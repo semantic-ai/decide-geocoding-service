@@ -308,9 +308,10 @@ class GeoAnnotation(NERAnnotation):
 class TripletAnnotation(NERAnnotation):
     """NER annotation representing an RDF statement (subject-predicate-object triple)."""
     
-    def __init__(self, predicate: str, obj: str, activity_id: str, source_uri: str, start: int, end: int, agent: str, agent_type: str):
+    def __init__(self, subject: str, predicate: str, obj: str, activity_id: str, source_uri: str, start: int, end: int, agent: str, agent_type: str):
         super().__init__(activity_id, source_uri, predicate, start, end, agent, agent_type)
         self.object = obj
+        self.subject = subject
 
     def to_labelstudio_result(self) -> dict:
         return {}
@@ -351,9 +352,8 @@ class TripletAnnotation(NERAnnotation):
             )
         )
         for item in query_result['results']['bindings']:
-            yield cls(item['pred']['value'], item['obj']['value'], item['activity']['value'], uri,
-                      item['start']['value'], item['end']['value'], item['agent']['value'],
-                      item.get('agentType', {}).get('value'))
+            yield cls(item['subj']['value'], item['pred']['value'], item['obj']['value'], item['activity']['value'], uri,
+                      item['start']['value'], item['end']['value'], item['agent']['value'], item.get('agentType', {}).get('value'))
 
     def add_to_triplestore(self):
         query_template = Template(
@@ -373,7 +373,7 @@ class TripletAnnotation(NERAnnotation):
                      oa:hasTarget $part_of_id .
                                  
                   $skolem a rdf:Statement ;
-                    rdf:subject $uri ;
+                    rdf:subject $subject ;
                     rdf:predicate $pred ;
                     rdf:object $obj .
                     
@@ -398,7 +398,7 @@ class TripletAnnotation(NERAnnotation):
                          prov:wasAssociatedWith $user .
                     
                     ?existingSkolem a rdf:Statement ;
-                      rdf:subject $uri ;
+                      rdf:subject $subject ;
                       rdf:predicate $pred ;
                       rdf:object $obj .
                       
@@ -420,6 +420,7 @@ class TripletAnnotation(NERAnnotation):
             uri=sparql_escape_uri(self.source_uri),
             user=sparql_escape_uri(self.agent),
             skolem=sparql_escape_uri("http://example.org/{0}".format(uuid.uuid4())),
+            subject=sparql_escape_uri(self.subject),
             pred=self.class_uri,
             obj=sparql_escape_string(self.object),
             selector_id=sparql_escape_uri("http://www.example.org/id/.well-known/genid/{0}".format(uuid.uuid4())),
