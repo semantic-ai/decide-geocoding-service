@@ -2,22 +2,16 @@ from uuid import uuid4
 from helpers import query
 from string import Template
 from escape_helpers import sparql_escape_uri, sparql_escape_string, sparql_escape_float, sparql_escape_int
+from .sparql_config import get_prefixes_for_query, GRAPHS
 
 
 def get_generic_insertion_query_part() -> Template:
-    return Template("""
-    PREFIX oa: <http://www.w3.org/ns/oa#>
-    PREFIX mu: <http://mu.semte.ch/vocabularies/core/>
-    PREFIX dcterms: <http://purl.org/dc/terms/>
-    PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-    PREFIX locn: <http://www.w3.org/ns/locn#>
-    PREFIX geosparql: <http://www.opengis.net/ont/geosparql#>
-    PREFIX nif: <http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#>
-    PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-    PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
-
+    """Generate the base SPARQL INSERT template for annotations."""
+    return Template(
+        get_prefixes_for_query("oa", "mu", "dcterms", "rdfs", "locn", "geosparql", "nif", "xsd", "skos") +
+        """
     INSERT DATA {
-    GRAPH $graph {
+    GRAPH <""" + GRAPHS["ai"] + """> {
         $annotation a oa:Annotation ;
         mu:uuid $uuid ;
         oa:hasBody $body ;
@@ -40,6 +34,7 @@ def get_generic_insertion_query_part() -> Template:
 
 
 def get_street_annotation_insertion_query_part() -> Template:
+    """Generate SPARQL fragment for street-specific annotation data."""
     return Template("""
     $body a dcterms:Location , <https://data.vlaanderen.be/ns/adres#Straatnaam> ;
       rdfs:label $label ;
@@ -52,6 +47,7 @@ def get_street_annotation_insertion_query_part() -> Template:
 
 
 def get_address_annotation_insertion_query_part() -> Template:
+    """Generate SPARQL fragment for address-specific annotation data."""
     return Template("""
     $body a dcterms:Location , locn:Address ;
       rdfs:label $label ;
@@ -69,6 +65,7 @@ def insert_annotation(geo_entity: str, body_uri: str,
                       confidence: float, target_uri: str,
                       source_doc: str, selector_uri: str,
                       start_offset: int, end_offset: int) -> None:
+    """Insert a geographic entity annotation with location data into the triplestore."""
     insertion_query = get_generic_insertion_query_part()
 
     if geo_entity == "streets":

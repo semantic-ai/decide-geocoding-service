@@ -6,6 +6,7 @@ from typing import Optional
 
 
 def clean_string(input_string):
+    """Remove extra whitespace and normalize string formatting."""
     cleaned_string = input_string.replace('\n', ' ')
     cleaned_string = cleaned_string.strip()
     cleaned_string = re.sub(r'\s+', ' ', cleaned_string)
@@ -14,6 +15,7 @@ def clean_string(input_string):
 
 
 def clean_house_number(housenumber):
+    """Clean and standardize house number format."""
     # Split the housenumbers based on "," , "en" and "/"
     housenumber = housenumber.replace("  ", " ").replace(
         "tot en met", 't.e.m.').replace("TOT EN MET", 't.e.m.')
@@ -79,6 +81,7 @@ def clean_house_number(housenumber):
 
 
 def extract_house_and_bus_number(housenumber):
+    """Split house number into main number and bus/apartment number."""
     bus_number = None
     house_number = None
 
@@ -99,6 +102,7 @@ def extract_house_and_bus_number(housenumber):
 
 
 def form_addresses(entities, from_city="Gent"):
+    """Combine extracted entities into complete address strings."""
     current_address = {"name": None, "house_number": None, "house_numbers": [
     ], "bus": None, "postcode": None, "city": None, "type": "HOUSE", "spacy_entities": []}
     addresses = []
@@ -137,6 +141,7 @@ def form_addresses(entities, from_city="Gent"):
 
 
 def form_locations(entities, from_city="Gent"):
+    """Form location queries from extracted entities for geocoding."""
     current_address = {"name": None, "house_number": None, "house_numbers": [
     ], "bus": None, "postcode": None, "city": None, "type": None, "spacy_entities": []}
     addresses = []
@@ -169,6 +174,7 @@ def form_locations(entities, from_city="Gent"):
 
 
 def split_addresses(addresses):
+    """Split full addresses into street and address components."""
     individual_addresses = []
     for multi_address in addresses:
         for house_number_string in multi_address['house_numbers']:
@@ -188,6 +194,7 @@ def split_addresses(addresses):
 
 
 def process_text(text, ner_model, from_city="Gent"):
+    """Extract named entities from text and organize them by type."""
     doc = ner_model.extract_entities(text)
     if hasattr(doc, 'error'):
         return [], [], doc
@@ -203,6 +210,7 @@ def process_text(text, ner_model, from_city="Gent"):
 
 
 def geocode_detectable(detectable, geocoder, default_city="Gent"):
+    """Geocode a detected entity (address or street) and return GeoJSON result."""
     name = detectable.get("name", "")
     if not name:
         return {"success": False, "error": "No name in detectable"}
@@ -238,7 +246,7 @@ def geocode_detectable(detectable, geocoder, default_city="Gent"):
 
 
 def render_entities_html(doc):
-    """Render entities with custom styling"""
+    """Render spaCy Doc with highlighted entities as HTML."""
     html_content = ""
     last_end = 0
 
@@ -259,6 +267,7 @@ def render_entities_html(doc):
 
 
 def get_street_uri(gemeentenaam: str, straatnaam: str, timeout: int = 15) -> Optional[str]:
+    """Retrieve the URI for a street from an external API."""
     url = f"{os.getenv('BASE_REGISTRY_URI')}/v2/straatnamen/"
     params = {"gemeentenaam": gemeentenaam, "straatnaam": straatnaam}
     r = requests.get(url, params=params, headers={
@@ -275,6 +284,7 @@ def get_street_uri(gemeentenaam: str, straatnaam: str, timeout: int = 15) -> Opt
 
 
 def get_address_uri(gemeentenaam: str, straatnaam: str, huisnummer: str, busnummer: Optional[str] = None, timeout: int = 15) -> Optional[str]:
+    """Retrieve the URI for a specific address from an external API."""
     url = f"{os.getenv('BASE_REGISTRY_URI')}/v2/adressen/"
     params = {
         "gemeentenaam": gemeentenaam,
@@ -298,6 +308,7 @@ def get_address_uri(gemeentenaam: str, straatnaam: str, huisnummer: str, busnumm
 
 
 def get_start_end_offsets(text: str, word: str) -> list:
+    """Find all start and end positions of a word in text."""
     offsets = []
     start = 0
     while True:

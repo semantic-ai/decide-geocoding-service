@@ -3,7 +3,7 @@ services:
     image: mediagis/nominatim:5.1
     container_name: nominatim
     networks:
-      - decide
+      - app-decide_default
     expose:
       - "8080:8080"
     environment:
@@ -17,18 +17,21 @@ services:
     build:
       context: .
     ports:
-      - "8081:80"
+      - "8082:80"
     networks:
-      - decide
+      - app-decide_default
     environment:
       MODE: "development"
       LOG_LEVEL: "debug"
-      MU_SPARQL_ENDPOINT: http://virtuoso:8890/sparql
+      MU_SPARQL_ENDPOINT: http://app-decide-virtuoso-1:8890/sparql
       NOMINATIM_BASE_URL: http://nominatim:8080
       NER_LABELS: '["CITY", "DOMAIN", "HOUSENUMBERS", "INTERSECTION", "POSTCODE", "PROVINCE", "ROAD", "STREET"]'
+      OPENAI_API_KEY: 'sk-SECRET-PART'
+      LLM_MODEL_NAME: 'gpt-4o-mini'
+      LLM_TEMPERATURE: 0.1
     volumes:
       - ./:/app
 
 networks:
-  decide:
+  app-decide_default:
     external: true

@@ -1,20 +1,17 @@
 from string import Template
 from helpers import query
 from escape_helpers import sparql_escape_uri
+from .sparql_config import get_prefixes_for_query, GRAPHS, ORGANIZATIONS
 
 
 def register_airo():
-    digiteam = "https://www.vlaanderen.be/organisaties/administratieve-diensten-van-de-vlaamse-overheid/beleidsdomein-kanselarij-bestuur-buitenlandse-zaken-en-justitie/agentschap-binnenlands-bestuur/digiteam"
-    query_template = Template("""
-    PREFIX mu: <http://mu.semte.ch/vocabularies/core/>
-    PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-    PREFIX airo: <https://w3id.org/airo#>
-    PREFIX example: <http://www.example.org/>
-    PREFIX prov: <http://www.w3.org/ns/prov#> 
-    PREFIX lblod: <https://data.vlaanderen.be/ns/lblod#>
-
+    """Register the DECIDe AI system and its components in the triplestore."""
+    digiteam = ORGANIZATIONS["digiteam"]
+    query_template = Template(
+        get_prefixes_for_query("mu", "foaf", "airo", "example", "prov", "lblod") +
+        """
     INSERT DATA{
-        GRAPH <http://mu.semte.ch/graphs/ai> {
+        GRAPH <""" + GRAPHS["ai"] + """> {
             example:DECIDe a airo:AISystem ;
                 airo:isDevelopedBy $provider ;
                 airo:hasComponent example:entity-extraction .

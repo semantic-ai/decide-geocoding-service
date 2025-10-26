@@ -2,14 +2,16 @@ import contextlib
 import logging
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Any
 
 from string import Template
 from helpers import query
-from escape_helpers import sparql_escape_uri
+from escape_helpers import sparql_escape_uri, sparql_escape_string
+from ..sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES
 
 
 class Task(ABC):
+    """Base class for background tasks that process data from the triplestore."""
 
     def __init__(self, task_uri: str):
         super().__init__()
@@ -33,10 +35,10 @@ class Task(ABC):
 
     @classmethod
     def from_uri(cls, task_uri: str) -> 'Task':
-        q = Template("""
-            PREFIX adms: <http://www.w3.org/ns/adms#>
-            PREFIX task: <http://lblod.data.gift/vocabularies/tasks/>
-
+        """Create a Task instance from its URI in the triplestore."""
+        q = Template(
+            get_prefixes_for_query("adms", "task") +
+            """
             SELECT ?task ?taskType WHERE {
               ?task task:operation ?taskType .
               FILTER(?task = $uri)
@@ -47,30 +49,30 @@ class Task(ABC):
             if candidate_cls is not None:
                 return candidate_cls(task_uri)
             raise RuntimeError("Unknown task type {0}".format(b['taskType']['value']))
-        raise RuntimeError("Task with uri {0} not found").format(task_uri)
+        raise RuntimeError("Task with uri {0} not found".format(task_uri))
 
     def change_state(self, old_state: str, new_state: str, results_container_uri: str = "") -> None:
-        query_template = Template("""
-            PREFIX task: <http://redpencil.data.gift/vocabularies/tasks/>
-            PREFIX adms: <http://www.w3.org/ns/adms#>
-
+        """Update the task status in the triplestore."""
+        query_template = Template(
+            get_prefixes_for_query("task", "adms") +
+            """
             DELETE {
-            GRAPH <http://mu.semte.ch/graphs/jobs> {
+            GRAPH <""" + GRAPHS["jobs"] + """> {
                 ?task adms:status ?oldStatus .
             }
             }
             INSERT {
-            GRAPH <http://mu.semte.ch/graphs/jobs> {
+            GRAPH <""" + GRAPHS["jobs"] + """> {
                 ?task
                 $results_container_line
-                adms:status <http://redpencil.data.gift/id/concept/JobStatus/$new_state> .
+                adms:status <$new_status> .
 
             }
             }
             WHERE {
-            GRAPH <http://mu.semte.ch/graphs/jobs> {
+            GRAPH <""" + GRAPHS["jobs"] + """> {
                 BIND($task AS ?task)
-                BIND(<http://redpencil.data.gift/id/concept/JobStatus/$old_state> AS ?oldStatus)
+                BIND(<$old_status> AS ?oldStatus)
                 OPTIONAL { ?task adms:status ?oldStatus . }
             }
             }
@@ -80,43 +82,55 @@ class Task(ABC):
         if results_container_uri:
             results_container_line = f"task:resultsContainer <{results_container_uri}> ;"
 
-        query_string = query_template.substitute(new_state=new_state,
-                                                 old_state=old_state,
-                                                 task=sparql_escape_uri(self.task_uri),
-                                                 results_container_line=results_container_line)
+        query_string = query_template.substitute(
+            new_status=JOB_STATUSES[new_state],
+            old_status=JOB_STATUSES[old_state],
+            task=sparql_escape_uri(self.task_uri),
+            results_container_line=results_container_line)
 
         query(query_string)
 
     @contextlib.contextmanager
     def run(self):
+        """Context manager for task execution with state transitions."""
         self.change_state("scheduled", "busy")
         yield
         self.change_state("busy", "success")
 
     def execute(self):
+        """Run the task and handle state transitions."""
         with self.run():
             self.process()
 
     @abstractmethod
     def process(self):
+        """Process task data (implemented by subclasses)."""
         pass
 
 
 class DecisionTask(Task, ABC):
+    """Task that processes decision-making data with input and output containers."""
+    
     def __init__(self, task_uri: str):
         super().__init__(task_uri)
 
-        q = f"""
-        PREFIX dct: <http://purl.org/dc/terms/>
-
-        SELECT ?source WHERE {{
-          <{task_uri}> dct:source ?source .
-        }}
-        """
+        q = Template(
+            get_prefixes_for_query("dct", "task", "nfo") +
+            """
+        SELECT ?source WHERE {
+          BIND($task AS ?t)
+          ?t a task:Task .
+          OPTIONAL { 
+            ?t task:inputContainer ?ic . 
+            OPTIONAL { ?ic a nfo:DataContainer ; task:hasResource ?source . }
+          }
+        }
+        """).substitute(task=sparql_escape_uri(task_uri))
         r = query(q)
         self.source = r["results"]["bindings"][0]["source"]["value"]
 
     def fetch_data(self) -> str:
+        """Retrieve the input data for this task from the triplestore."""
         query_string = f"""
         SELECT ?title ?description ?decision_basis WHERE {{
         BIND(<{self.source}> AS ?s)
@@ -132,4 +146,6 @@ class DecisionTask(Task, ABC):
         description = query_result["results"]["bindings"][0]["description"]["value"]
         decision_basis = query_result["results"]["bindings"][0]["decision_basis"]["value"]
 
+
         return "\n".join([title, description, decision_basis])
+

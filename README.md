@@ -1,13 +1,15 @@
- # Geocoding Service: Text to Geolocation
- 
-This repo provides a geocoding service that processes text to extract and resolve geolocations. It combines natural language processing (NLP) for location extraction with geocoding to map locations to geographic coordinates.
+ # Geocoding & NER Service
 
-Location extraction is based on the RobBERT NER model and currently only suitable for Ghent. The service uses spaCy for NLP processing.
+This repo provides a unified service that processes text to extract and resolve geolocations, as well as general named entities. It combines natural language processing (NLP) for entity extraction with geocoding to map locations to geographic coordinates.
+
+Location extraction is based on the RobBERT NER model and currently only suitable for Ghent. General NER supports multiple languages (Dutch, German, English) and extraction methods (regex, spaCy, Flair, composite). The service uses spaCy for NLP processing.
  
  ## Features
  - Extracts location entities from text using an NLP model
+ - Extracts general entities (PERSON, ORG, DATE, etc.) with multi-language support
  - Resolves extracted locations to latitude/longitude using Nominatim
  - Load data from local triple store
+ - Stores all annotations in SPARQL triplestore with full provenance
  
  ## Requirements
  - Modify the docker-compose.yaml file and fill in the MU_SPARQL_ENDPOINT of the local triple store (hosted in the app-decide Docker container). This may require modifying the network name as well to match the docker network app-decide is running in.

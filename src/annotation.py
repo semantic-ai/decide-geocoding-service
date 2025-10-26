@@ -6,9 +6,12 @@ import uuid
 
 from helpers import query
 from escape_helpers import sparql_escape_uri, sparql_escape_string, sparql_escape_float, sparql_escape_int
+from .sparql_config import get_prefixes_for_query, GRAPHS, AGENT_TYPES
 
 
 class Annotation(ABC):
+    """Base class for Open Annotation objects with provenance information."""
+    
     def __init__(self, activity_id: str, source_uri: str, agent: str, agent_type: str):
         super().__init__()
         self.activity_id = activity_id
@@ -18,6 +21,7 @@ class Annotation(ABC):
 
     @classmethod
     def create_from_labelstudio(cls, activity_id: str, uri: str, user: str, annotation: Any) -> Optional['Annotation']:
+        """Create an annotation from Label Studio format."""
         if annotation['type'] == 'labels':
             return NERAnnotation(
                 activity_id,
@@ -26,7 +30,7 @@ class Annotation(ABC):
                 annotation['value']['start'],
                 annotation['value']['end'],
                 user,
-                "http://www.w3.org/ns/prov#Person"
+                AGENT_TYPES["person"]
             )
 
         if annotation['type'] == 'choices':
@@ -35,46 +39,50 @@ class Annotation(ABC):
                 uri,
                 annotation['value']['choices'],
                 user,
-                "http://www.w3.org/ns/prov#Person"
+                AGENT_TYPES["person"]
             )
 
         return None
 
     @abstractmethod
     def to_labelstudio_result(self) -> dict:
+        """Convert annotation to Label Studio result format."""
         pass
 
     @abstractmethod
     def add_to_triplestore(self):
+        """Insert this annotation into the triplestore."""
         pass
 
     @classmethod
     @abstractmethod
     def create_from_uri(cls, uri: str) -> Iterator['NERAnnotation']:
+        """Create annotation instances from a URI in the triplestore."""
         pass
 
 
 class LinkingAnnotation(Annotation):
+    """Annotation linking a resource to a classification/class."""
+    
     def __init__(self, activity_id: str, source_uri: str, class_uri: str, agent: str, agent_type: str):
         super().__init__(activity_id, source_uri, agent, agent_type)
         self.class_uri = class_uri
 
     @classmethod
     def create_from_uri(cls, uri: str) -> Iterator['NERAnnotation']:
-        query_template = Template("""
-        PREFIX oa:  <http://www.w3.org/ns/oa#>
-        PREFIX prov:  <http://www.w3.org/ns/prov#>
-
+        query_template = Template(
+            get_prefixes_for_query("oa", "prov", "rdf") +
+            """
         SELECT ?activity ?body ?agent ?agentType
         WHERE {
           ?annotation a oa:Annotation ;
                        oa:hasTarget ?target .
           ?annotation oa:hasBody ?body.
-          OPTIONAL { ?annotation oa:motivation ?motivation . }
+          OPTIONAL { ?annotation oa:motivatedBy ?motivation . }
 
           # Example filter (uncomment and edit as needed):
           FILTER(?target = $uri)
-          FILTER(?motivation = "linking")
+          FILTER(?motivation = oa:classifying)
 
           OPTIONAL {
               ?activity a prov:Activity ;
@@ -106,18 +114,11 @@ class LinkingAnnotation(Annotation):
         }
 
     def add_to_triplestore(self):
-        query_template = Template("""
-            PREFIX ex:  <http://example.org/>
-            PREFIX oa:  <http://www.w3.org/ns/oa#>
-            PREFIX mu:  <http://mu.semte.ch/vocabularies/core/>
-            PREFIX prov:  <http://www.w3.org/ns/prov#>
-            PREFIX foaf:  <http://xmlns.com/foaf/0.1/>
-            PREFIX dct:  <http://purl.org/dc/terms/>
-            PREFIX skolem:  <http://www.example.org/id/.well-known/genid/>
-            PREFIX nif:  <http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#>
-
+        query_template = Template(
+            get_prefixes_for_query("ex", "oa", "mu", "prov", "foaf", "dct", "skolem", "nif") +
+            """
             INSERT {
-              GRAPH <http://mu.semte.ch/graphs/ai> {
+              GRAPH <""" + GRAPHS["ai"] + """> {
                   $activity_id a prov:Activity;
                      prov:generated $annotation_id;
                      prov:wasAssociatedWith $user .
@@ -126,15 +127,15 @@ class LinkingAnnotation(Annotation):
                                  mu:uuid "$id";
                                  oa:hasBody $clz ;
                                  nif:confidence 1 ;
-                                 oa:motivation "linking" ;
+                                 oa:motivatedBy oa:classifying ;
                                  oa:hasTarget $uri .
               }
             } WHERE {
-              GRAPH <http://mu.semte.ch/graphs/ai> {
+              GRAPH <""" + GRAPHS["ai"] + """> {
                   FILTER NOT EXISTS { 
                     ?existingAnn a oa:Annotation ;
                         oa:hasBody $clz ;
-                        oa:motivation "linking" ;
+                        oa:motivatedBy oa:classifying ;
                         oa:hasTarget $uri .
     
                     ?existingAct a prov:Activity ;
@@ -156,6 +157,8 @@ class LinkingAnnotation(Annotation):
 
 
 class NERAnnotation(Annotation):
+    """Named Entity Recognition annotation with text position selectors."""
+    
     def __init__(self, activity_id: str, source_uri: str, class_uri: str, start: int, end: int, agent: str, agent_type: str):
         super().__init__(activity_id, source_uri, agent, agent_type)
         self.class_uri = class_uri
@@ -164,9 +167,9 @@ class NERAnnotation(Annotation):
 
     @classmethod
     def create_from_uri(cls, uri: str) -> Iterator['NERAnnotation']:
-        query_template = Template("""
-        PREFIX oa:  <http://www.w3.org/ns/oa#>
-
+        query_template = Template(
+            get_prefixes_for_query("oa", "prov", "rdf") +
+            """
         SELECT ?activity ?body ?start ?end ?agent ?agentType
         WHERE {
           ?annotation a oa:Annotation ;
@@ -176,11 +179,11 @@ class NERAnnotation(Annotation):
           ?selector a oa:TextPositionSelector ;
                   oa:start ?start; oa:end ?end .
           ?annotation oa:hasBody ?body.
-          OPTIONAL { ?annotation oa:motivation ?motivation . }
+          OPTIONAL { ?annotation oa:motivatedBy ?motivation . }
 
           # Example filter (uncomment and edit as needed):
           FILTER(?source = $uri)
-          FILTER(?motivation = "classifying")
+          FILTER(?motivation = oa:tagging)
 
           OPTIONAL {
               ?activity a prov:Activity ;
@@ -208,20 +211,11 @@ class NERAnnotation(Annotation):
         }
 
     def add_to_triplestore(self):
-        query_template = Template("""
-            PREFIX ex:  <http://example.org/>
-            PREFIX oa:  <http://www.w3.org/ns/oa#>
-            PREFIX mu:  <http://mu.semte.ch/vocabularies/core/>
-            PREFIX prov:  <http://www.w3.org/ns/prov#>
-            PREFIX foaf:  <http://xmlns.com/foaf/0.1/>
-            PREFIX dct:  <http://purl.org/dc/terms/>
-            PREFIX skolem:  <http://www.example.org/id/.well-known/genid/>
-            PREFIX nif:  <http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#>
-            PREFIX locn: <http://www.w3.org/ns/locn#>
-            PREFIX geosparql: <http://www.opengis.net/ont/geosparql#>
-
+        query_template = Template(
+            get_prefixes_for_query("ex", "oa", "mu", "prov", "foaf", "dct", "skolem", "nif", "locn", "geosparql") +
+            """
             INSERT {
-              GRAPH <http://mu.semte.ch/graphs/ai> {
+              GRAPH <""" + GRAPHS["ai"] + """> {
                   $activity_id a prov:Activity;
                      prov:generated $annotation_id;
                      prov:wasAssociatedWith $user .
@@ -230,7 +224,7 @@ class NERAnnotation(Annotation):
                                  mu:uuid "$id";
                                  oa:hasBody $clz ;
                                  nif:confidence 1 ;
-                                 oa:motivation "classifying" ;
+                                 oa:motivatedBy oa:tagging ;
                                  oa:hasTarget $part_of_id .
     
                   $part_of_id a oa:SpecificResource ;
@@ -244,11 +238,11 @@ class NERAnnotation(Annotation):
                   $extra
               }
             } WHERE {
-              GRAPH <http://mu.semte.ch/graphs/ai> {
+              GRAPH <""" + GRAPHS["ai"] + """> {
                   FILTER NOT EXISTS {
                     ?existingAnn a oa:Annotation ;
                         oa:hasBody $clz ;
-                        oa:motivation "classifying" ;
+                        oa:motivatedBy oa:tagging ;
                         oa:hasTarget ?existingTarget .
     
                     ?existingAct a prov:Activity ;
@@ -283,10 +277,13 @@ class NERAnnotation(Annotation):
         query(query_string)
 
     def get_extra_inserts(self) -> str:
+        """Return additional SPARQL triples to insert for this annotation type."""
         return ""
 
 
 class GeoAnnotation(NERAnnotation):
+    """NER annotation with geographic location data (GeoJSON)."""
+    
     def __init__(self, geojson: dict, *args, **kwargs):
         super().__init__(*args, **kwargs)
         logging.fatal(geojson)
@@ -309,18 +306,21 @@ class GeoAnnotation(NERAnnotation):
 
 
 class TripletAnnotation(NERAnnotation):
-    def __init__(self, predicate: str, obj: str, activity_id: str, source_uri: str, start: int, end: int, agent: str, agent_type: str):
+    """NER annotation representing an RDF statement (subject-predicate-object triple)."""
+    
+    def __init__(self, subject: str, predicate: str, obj: str, activity_id: str, source_uri: str, start: int, end: int, agent: str, agent_type: str):
         super().__init__(activity_id, source_uri, predicate, start, end, agent, agent_type)
         self.object = obj
+        self.subject = subject
 
     def to_labelstudio_result(self) -> dict:
         return {}
 
     @classmethod
     def create_from_uri(cls, uri: str) -> Iterator['TripletAnnotation']:
-        query_template = Template("""
-                PREFIX oa:  <http://www.w3.org/ns/oa#>
-
+        query_template = Template(
+            get_prefixes_for_query("oa", "prov", "rdf") +
+            """
                 SELECT ?activity ?start ?end ?agent ?agentType ?subj ?pred ?obj
                 WHERE {
                   ?annotation a oa:Annotation ;
@@ -331,11 +331,11 @@ class TripletAnnotation(NERAnnotation):
                           oa:start ?start; oa:end ?end .
                   ?annotation oa:hasBody ?body.
                   ?body a rdf:Statement ; rdf:subject ?subj; rdf:predicate ?pred; rdf:object ?obj .
-                  OPTIONAL { ?annotation oa:motivation ?motivation . }
+                  OPTIONAL { ?annotation oa:motivatedBy ?motivation . }
 
                   # Example filter (uncomment and edit as needed):
                   FILTER(?source = $uri)
-                  FILTER(?motivation = "relation-extraction")
+                  FILTER(?motivation = oa:linking)
 
                   OPTIONAL {
                       ?activity a prov:Activity ;
@@ -352,24 +352,15 @@ class TripletAnnotation(NERAnnotation):
             )
         )
         for item in query_result['results']['bindings']:
-            print(query_result)
-            yield cls(item['pred']['value'], item['obj']['value'], item['activity']['value'], uri,
-                      int(item['start']['value']), int(item['end']['value']), item['agent']['value'],
-                      item.get('agentType', {}).get('value'))
+            yield cls(item['subj']['value'], item['pred']['value'], item['obj']['value'], item['activity']['value'], uri,
+                      item['start']['value'], item['end']['value'], item['agent']['value'], item.get('agentType', {}).get('value'))
 
     def add_to_triplestore(self):
-        query_template = Template("""
-            PREFIX ex:  <http://example.org/>
-            PREFIX oa:  <http://www.w3.org/ns/oa#>
-            PREFIX mu:  <http://mu.semte.ch/vocabularies/core/>
-            PREFIX prov:  <http://www.w3.org/ns/prov#>
-            PREFIX foaf:  <http://xmlns.com/foaf/0.1/>
-            PREFIX dct:  <http://purl.org/dc/terms/>
-            PREFIX skolem:  <http://www.example.org/id/.well-known/genid/>
-            PREFIX nif:  <http://persistence.uni-leipzig.org/nlp2rdf/ontologies/nif-core#>
-
+        query_template = Template(
+            get_prefixes_for_query("ex", "oa", "mu", "prov", "foaf", "dct", "skolem", "nif", "rdf") +
+            """
             INSERT {
-              GRAPH <http://mu.semte.ch/graphs/ai> {
+              GRAPH <""" + GRAPHS["ai"] + """> {
                   $activity_id a prov:Activity;
                      prov:generated $annotation_id;
                      prov:wasAssociatedWith $user .
@@ -378,11 +369,11 @@ class TripletAnnotation(NERAnnotation):
                      mu:uuid "$id";
                      oa:hasBody $skolem ;
                      nif:confidence 1 ;
-                     oa:motivation "relation-extraction" ;
+                     oa:motivatedBy oa:linking ;
                      oa:hasTarget $part_of_id .
                                  
                   $skolem a rdf:Statement ;
-                    rdf:subject $uri ;
+                    rdf:subject $subject ;
                     rdf:predicate $pred ;
                     rdf:object $obj .
                     
@@ -395,11 +386,11 @@ class TripletAnnotation(NERAnnotation):
                     oa:end $end .
               }
             } WHERE {
-              GRAPH <http://mu.semte.ch/graphs/ai> {
+              GRAPH <""" + GRAPHS["ai"] + """> {
                   FILTER NOT EXISTS { 
                     ?existingAnn a oa:Annotation ;
                         oa:hasBody ?existingSkolem ;
-                        oa:motivation "relation-extraction" ;
+                        oa:motivatedBy oa:linking ;
                         oa:hasTarget ?existingTarget .
 
                     ?existingAct a prov:Activity ;
@@ -407,7 +398,7 @@ class TripletAnnotation(NERAnnotation):
                          prov:wasAssociatedWith $user .
                     
                     ?existingSkolem a rdf:Statement ;
-                      rdf:subject $uri ;
+                      rdf:subject $subject ;
                       rdf:predicate $pred ;
                       rdf:object $obj .
                       
@@ -429,6 +420,7 @@ class TripletAnnotation(NERAnnotation):
             uri=sparql_escape_uri(self.source_uri),
             user=sparql_escape_uri(self.agent),
             skolem=sparql_escape_uri("http://example.org/{0}".format(uuid.uuid4())),
+            subject=sparql_escape_uri(self.subject),
             pred=self.class_uri,
             obj=sparql_escape_string(self.object),
             selector_id=sparql_escape_uri("http://www.example.org/id/.well-known/genid/{0}".format(uuid.uuid4())),

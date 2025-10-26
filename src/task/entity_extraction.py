@@ -1,64 +1,63 @@
-import os
-import json
-
-from uuid import uuid4
-
-from ..helper_functions import clean_string, get_start_end_offsets, process_text, geocode_detectable, get_street_uri
-from ..spacy_ner_analyzer import SpacyNERAnalyzer
-from ..nominatim_geocoder import NominatimGeocoder
-from ..annotation import GeoAnnotation
+from ..ner_functions import extract_entities
+from ..annotation import TripletAnnotation
+from ..sparql_config import TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES
 from .base import DecisionTask
+from escape_helpers import sparql_escape_string
 
 
 class EntityExtractionTask(DecisionTask):
-    __task_type__ = "http://lblod.data.gift/id/jobs/concept/TaskOperation/entity-extracting"
+    """Task that extracts named entities from text."""
 
-    ner_analyzer = SpacyNERAnalyzer(model_path=os.getenv("NER_MODEL_PATH"), labels=json.loads(os.getenv("NER_LABELS")))
-    geocoder = NominatimGeocoder(base_url=os.getenv("NOMINATIM_BASE_URL"), rate_limit=0.5)
+    __task_type__ = TASK_OPERATIONS["entity_extraction"]
 
-    def apply_geo_entities(self, task_data: str):
-        default_city = "Gent"
+    def create_title_relation(self, source_uri: str, entities: list[dict[str, Any]]):
+        for entity in entities:
+            if entity['label'] == 'TITLE':
+                TripletAnnotation(
+                    subject=self.source,
+                    predicate="dct:title",
+                    obj=sparql_escape_string(entity['text']),
+                    activity_id=self.task_uri,
+                    source_uri=source_uri,
+                    start=entity['start'],
+                    end=entity['end'],
+                    agent=AI_COMPONENTS["ner_extractor"],
+                    agent_type=AGENT_TYPES["ai_component"]
+                ).add_to_triplestore()
+                self.logger.info(
+                    f"Created Title triplet suggestion for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
 
-        cleaned_text = clean_string(task_data)
-        detectables, _, doc = process_text(cleaned_text, self.__class__.ner_analyzer, default_city)
+    def create_en_translation(self, task_data: str) -> str:
+        return None
 
-        if hasattr(doc, 'error'):
-            self.logger.error(f"Error: {doc['error']}")
-        else:
-            # Geocoding Results
-            if detectables:
-                self.logger.info("Geocoding Results")
+    def extract_general_entities(self, task_data: str, language: str = 'dutch', method: str = 'regex') -> list[
+        dict[str, Any]]:
+        """
+        Extract general NER entities (PERSON, ORG, DATE, etc.) from text.
 
-                for geo_entity in ["streets", "addresses"]:
-                    if geo_entity in detectables:
-                        for detectable in detectables[geo_entity]:
-                            result = geocode_detectable(detectable, self.__class__.geocoder, default_city)
-                            print(result)
+        Args:
+            task_data: Text to extract entities from
+            language: Language for extraction ('dutch', 'german', 'english')
+            method: Extraction method ('regex', 'spacy', 'flair', 'composite', 'title')
+        """
+        self.logger.info(f"Extracting general entities using {method}/{language}")
 
-                            if result["success"]:
-                                if geo_entity == "streets":
-                                    offsets = get_start_end_offsets(task_data, detectable["name"])
-                                    start_offset = offsets[0][0]
-                                    end_offset = offsets[0][1]
-                                    annotation = GeoAnnotation(
-                                        result.get("geojson", {}),
-                                        self.task_uri,
-                                        self.source,
-                                        "http://example.org/{0}".format(uuid4()),
-                                        start_offset,
-                                        end_offset,
-                                        "http://example.org/entity-extraction",
-                                        "https://data.vlaanderen.be/ns/lblod#AIComponent"
-                                    )
-                                    annotation.add_to_triplestore()
-                            self.logger.info(result)
-            else:
-                self.logger.info("No location entities detected.")
+        # Extract entities using the factory pattern
+        entities = extract_entities(task_data, language=language, method=method)
+        self.logger.info(f"Found {len(entities)} general entities")
+
+        return entities
 
     def process(self):
-        task_data = self.fetch_data()
-        self.logger.info(task_data)
-        self.apply_geo_entities(task_data)
+        eli_expression = self.fetch_data()
+        self.logger.info(eli_expression)
 
+        # Uses defaults from ner_config.py: language='dutch', method='regex'
+        # Language can be passed in future when extracted from database
+        # todo fallback to source to be removed
+        uri_of_translation_expr = self.create_en_translation(eli_expression) or self.source
+        entities = self.extract_general_entities(eli_expression)
 
-
+        # todo to be improved upon a lot by inserting functions to create the other predicates
+        # ELI properties
+        self.create_title_relation(uri_of_translation_expr, entities)

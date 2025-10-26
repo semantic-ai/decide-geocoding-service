@@ -5,6 +5,8 @@ import logging
 
 
 class NominatimGeocoder:
+    """Geocoder client for Nominatim OpenStreetMap geocoding service."""
+    
     def __init__(self, base_url: str = "http://localhost:8080", rate_limit: float = 1.0, timeout: float = 10.0):
         self.base_url = base_url.rstrip("/")
         self.rate_limit = max(0.0, rate_limit)
@@ -15,6 +17,7 @@ class NominatimGeocoder:
         self.logger = logging.getLogger(__name__)
 
     def _throttle(self) -> None:
+        """Enforce rate limiting between API requests."""
         now = time.monotonic()
         wait = self.rate_limit - (now - self._last)
         if wait > 0:
@@ -22,6 +25,7 @@ class NominatimGeocoder:
         self._last = time.monotonic()
 
     def search(self, query: str, city: str = "Gent", limit: int = 1, country: str = "BE") -> Optional[Dict[str, Any]]:
+        """Search for a location and return geocoded result with coordinates."""
         if not query or not query.strip():
             return None
 

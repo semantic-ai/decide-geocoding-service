@@ -2,7 +2,9 @@ import os
 
 from src.airo import register_airo
 from src.task.base import Task
+from src.task.geo_extraction import GeoExtractionTask
 from src.task.entity_extraction import EntityExtractionTask
+from src.task.entity_linking import EntityLinkingTask
 
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
