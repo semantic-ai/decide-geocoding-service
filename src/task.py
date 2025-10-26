@@ -125,11 +125,16 @@ class DecisionTask(Task, ABC):
         super().__init__(task_uri)
 
         q = Template(
-            get_prefixes_for_query("dct") +
+            get_prefixes_for_query("dct", "task", "nfo") +
             """
-        SELECT ?source WHERE {{
-          $task dct:source ?source .
-        }}
+        SELECT ?source WHERE {
+          BIND($task AS ?t)
+          ?t a task:Task .
+          OPTIONAL { 
+            ?t task:inputContainer ?ic . 
+            OPTIONAL { ?ic a nfo:DataContainer ; task:hasResource ?source . }
+          }
+        }
         """).substitute(task=sparql_escape_uri(task_uri))
         r = query(q)
         self.source = r["results"]["bindings"][0]["source"]["value"]
@@ -209,6 +214,8 @@ class GeoExtractionTask(DecisionTask):
         
 class EntityExtractionTask(DecisionTask):
     """Task that extracts named entities from text."""
+
+    __task_type__ = TASK_OPERATIONS["entity_extraction"]
 
     def create_title_relation(self, source_uri: str, entities: list[dict[str, Any]]):
         for entity in entities:
