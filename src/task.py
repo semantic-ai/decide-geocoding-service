@@ -14,7 +14,7 @@ from .helper_functions import clean_string, get_start_end_offsets, process_text,
 from .ner_extractors import SpacyGeoAnalyzer
 from .ner_functions import extract_entities
 from .nominatim_geocoder import NominatimGeocoder
-from .annotation import GeoAnnotation, LinkingAnnotation
+from .annotation import GeoAnnotation, LinkingAnnotation, TripletAnnotation
 from .sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES
 from .llm_models.llm_model_clients import OpenAIModel
 from .llm_models.llm_task_models import LlmTaskInput, EntityLinkingTaskOutput
