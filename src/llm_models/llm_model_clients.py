@@ -4,7 +4,7 @@ from .llm_task_models import LlmTaskInput
 from pydantic import BaseModel
 
 
-class Model(ABC):
+class RemoteLlmModel(ABC):
     def __init__(self, config: dict):
         self.config = config
 
@@ -18,7 +18,7 @@ class Model(ABC):
         pass
 
 
-class OpenAIModel(Model):
+class OpenAIModel(RemoteLlmModel):
     """Class implementing the OpenAI LLM client"""
 
     def __init__(self, config: dict):

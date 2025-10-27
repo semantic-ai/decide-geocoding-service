@@ -269,10 +269,10 @@ class EntityExtractionTask(DecisionTask):
         self.create_title_relation(uri_of_translation_expr, entities)        
 
 
-class EntityLinkingTask(DecisionTask):
+class ModelAnnotatingTask(DecisionTask):
     """Task that links the correct code from a list to text."""
     
-    __task_type__ = TASK_OPERATIONS["entity_linking"]
+    __task_type__ = TASK_OPERATIONS["model_annotation"]
 
     def __init__(self, task_uri: str):
         super().__init__(task_uri)

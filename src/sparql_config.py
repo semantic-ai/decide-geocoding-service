@@ -72,7 +72,7 @@ JOB_STATUSES = {
 
 TASK_OPERATIONS = {
     "entity_extraction": "http://lblod.data.gift/id/jobs/concept/TaskOperation/entity-extracting",
-    "entity_linking": "http://lblod.data.gift/id/jobs/concept/TaskOperation/entity-linking",
+    "model_annotation": "http://lblod.data.gift/id/jobs/concept/TaskOperation/model-annotating",
     "geo_extraction": "http://lblod.data.gift/id/jobs/concept/TaskOperation/geo-extracting",
 }
 
