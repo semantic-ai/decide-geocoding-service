@@ -1,3 +1,4 @@
+from typing import Any
 from ..ner_functions import extract_entities
 from ..annotation import TripletAnnotation
 from ..sparql_config import TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES

@@ -3,6 +3,7 @@ from helpers import query
 
 def test_triplet_annotation():
     annotation = TripletAnnotation(
+        "http://data.gent.info/besluit1",
         "dct:title",
         "Test",
         "http://example.org/testactivity",
@@ -24,6 +25,7 @@ def test_triplet_annotation():
     assert len(list(TripletAnnotation.create_from_uri("http://data.gent.info/besluit1"))) == 1
 
     annotation2 = TripletAnnotation(
+        "http://data.gent.info/besluit2",
         "dct:title",
         "Test2",
         "http://example.org/testactivity",
@@ -42,7 +44,7 @@ def test_triplet_annotation():
             GRAPH <http://mu.semte.ch/graphs/ai> {
             ?existingAnn a oa:Annotation ;
                  oa:hasBody ?existingSkolem ;
-                 oa:motivation "relation-extraction" .
+                 oa:motivatedBy oa:linking .
             }
         }""")
     assert len(result['results']['bindings']) == 2
@@ -86,7 +88,7 @@ def test_ner_annotation():
             GRAPH <http://mu.semte.ch/graphs/ai> {
             ?existingAnn a oa:Annotation ;
                  oa:hasBody ?existingSkolem ;
-                 oa:motivation "classifying" .
+                 oa:motivatedBy oa:tagging .
             }
         }""")
     assert len(result['results']['bindings']) == 2
@@ -126,7 +128,7 @@ def test_linking_annotation():
             GRAPH <http://mu.semte.ch/graphs/ai> {
             ?existingAnn a oa:Annotation ;
                  oa:hasBody ?existingSkolem ;
-                 oa:motivation "linking" .
+                 oa:motivatedBy oa:classifying .
             }
         }""")
     assert len(result['results']['bindings']) == 2

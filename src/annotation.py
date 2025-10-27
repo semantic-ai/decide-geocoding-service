@@ -353,7 +353,7 @@ class TripletAnnotation(NERAnnotation):
         )
         for item in query_result['results']['bindings']:
             yield cls(item['subj']['value'], item['pred']['value'], item['obj']['value'], item['activity']['value'], uri,
-                      item['start']['value'], item['end']['value'], item['agent']['value'], item.get('agentType', {}).get('value'))
+                      int(item['start']['value']), int(item['end']['value']), item['agent']['value'], item.get('agentType', {}).get('value'))
 
     def add_to_triplestore(self):
         query_template = Template(
