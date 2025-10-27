@@ -2,6 +2,7 @@ import contextlib
 import logging
 import os
 import json
+import langdetect
 from abc import ABC, abstractmethod
 from typing import Optional, Any
 
@@ -217,6 +218,24 @@ class EntityExtractionTask(DecisionTask):
 
     __task_type__ = TASK_OPERATIONS["entity_extraction"]
 
+    def create_language_relation(self, source_uri: str, language: str):
+        language_mapping = {
+            'nl': "http://publications.europa.eu/resource/authority/language/NLD",
+            'de': "http://publications.europa.eu/resource/authority/language/DEU",
+            'en': "http://publications.europa.eu/resource/authority/language/ENG"
+        }
+        TripletAnnotation(
+            subject=self.source,
+            predicate="eli:language",
+            obj=sparql_escape_uri(language_mapping.get(language)),
+            activity_id=self.task_uri,
+            source_uri=source_uri,
+            start=0,
+            end=0,
+            agent=AI_COMPONENTS["ner_extractor"],
+            agent_type=AGENT_TYPES["ai_component"]
+        ).add_to_triplestore()
+
     def create_title_relation(self, source_uri: str, entities: list[dict[str, Any]]):
         for entity in entities:
             if entity['label'] == 'TITLE':
@@ -234,7 +253,8 @@ class EntityExtractionTask(DecisionTask):
                 self.logger.info(f"Created Title triplet suggestion for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
 
     def create_en_translation(self, task_data: str) -> str:
-        return None
+        # todo fallback to source to be removed
+        return self.source
 
     def extract_general_entities(self, task_data: str, language: str = 'dutch', method: str = 'regex') -> list[dict[str, Any]]:
         """
@@ -253,20 +273,23 @@ class EntityExtractionTask(DecisionTask):
 
         return entities
 
-
     def process(self):
         eli_expression = self.fetch_data()
         self.logger.info(eli_expression)
 
+        language = langdetect.detect(eli_expression)
+        # todo replace first argument with eli:expression uri
+        self.create_language_relation(self.source, language)
+
         # Uses defaults from ner_config.py: language='dutch', method='regex'
         # Language can be passed in future when extracted from database
-        # todo fallback to source to be removed
-        uri_of_translation_expr = self.create_en_translation(eli_expression) or self.source
-        entities = self.extract_general_entities(eli_expression)
+        uri_of_translation_expr = self.create_en_translation(eli_expression)
+        #entities = self.extract_general_entities(eli_expression, language)
 
         # todo to be improved upon a lot by inserting functions to create the other predicates
         # ELI properties
-        self.create_title_relation(uri_of_translation_expr, entities)        
+        entities = extract_entities(eli_expression, language=language, method='title')
+        self.create_title_relation(uri_of_translation_expr, entities)
 
 
 class ModelAnnotatingTask(DecisionTask):
