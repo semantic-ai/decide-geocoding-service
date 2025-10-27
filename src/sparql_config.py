@@ -32,7 +32,7 @@ SPARQL_PREFIXES = {
     "skos": "http://www.w3.org/2004/02/skos/core#",
     "adms": "http://www.w3.org/ns/adms#",
     "task": "http://lblod.data.gift/vocabularies/tasks/",
-    "eli": "http://data.europa.eu/eli/ontology#>",
+    "eli": "http://data.europa.eu/eli/ontology#",
     "nfo": "http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#"
 }
 

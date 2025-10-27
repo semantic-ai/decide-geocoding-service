@@ -86,7 +86,7 @@ class SpacyGeoAnalyzer:
 class BaseExtractor:
     """Base class for all NER extractors."""
     
-    def __init__(self, language: str = 'english'):
+    def __init__(self, language: str = 'en'):
         self.language = language
         self.settings = DEFAULT_SETTINGS.copy()
     
@@ -147,16 +147,16 @@ class SpacyExtractor(BaseExtractor):
 class FlairExtractor(BaseExtractor):
     """Extract entities using Flair models."""
     
-    def __init__(self, language: str = 'german', model_name: str = None):
+    def __init__(self, language: str = 'de', model_name: str = None):
         super().__init__(language)
         self.model_name = model_name or self._get_default_model()
     
     def _get_default_model(self) -> str:
         """Get default Flair model based on language."""
         model_mapping = {
-            'german': 'flair/ner-german-legal',
-            'english': 'flair/ner-english',
-            'dutch': 'flair/ner-dutch'
+            'de': 'flair/ner-german-legal',
+            'en': 'flair/ner-english',
+            'nl': 'flair/ner-dutch'
         }
         return model_mapping.get(self.language, 'flair/ner-english')
     
@@ -192,7 +192,7 @@ class FlairExtractor(BaseExtractor):
 class TitleExtractor(BaseExtractor):
     """Extract document title using Hugging Face Gemma model."""
     
-    def __init__(self, language: str = 'dutch'):
+    def __init__(self, language: str = 'nl'):
         super().__init__(language)
     
     def extract(self, text: str) -> List[Dict[str, Any]]:
@@ -270,7 +270,7 @@ class TitleExtractor(BaseExtractor):
 class RegexExtractor(BaseExtractor):
     """Extract entities using regex patterns."""
     
-    def __init__(self, language: str = 'english', patterns: Dict[str, List[str]] = None):
+    def __init__(self, language: str = 'en', patterns: Dict[str, List[str]] = None):
         super().__init__(language)
         self.patterns = patterns or {}
         self._compiled_patterns = {}
@@ -343,22 +343,22 @@ class CompositeExtractor(BaseExtractor):
 def create_german_extractor() -> CompositeExtractor:
     """Create a comprehensive German NER extractor using Flair's legal model."""
     return CompositeExtractor([
-        FlairExtractor('german', 'flair/ner-german-legal'),
-        LanguageRegexExtractor('german')
+        FlairExtractor('de', 'flair/ner-german-legal'),
+        LanguageRegexExtractor('de')
     ])
 
 
 def create_dutch_extractor() -> CompositeExtractor:
     """Create a comprehensive Dutch NER extractor."""
     return CompositeExtractor([
-        SpacyExtractor('dutch'),
-        LanguageRegexExtractor('dutch')
+        SpacyExtractor('nl'),
+        LanguageRegexExtractor('nl')
     ])
 
 
 def create_english_extractor() -> CompositeExtractor:
     """Create a comprehensive English NER extractor."""
     return CompositeExtractor([
-        SpacyExtractor('english'),
-        LanguageRegexExtractor('english')  # Will be empty unless patterns are added
+        SpacyExtractor('en'),
+        LanguageRegexExtractor('en')  # Will be empty unless patterns are added
     ])

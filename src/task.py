@@ -253,7 +253,8 @@ class EntityExtractionTask(DecisionTask):
                 self.logger.info(f"Created Title triplet suggestion for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
 
     def create_en_translation(self, task_data: str) -> str:
-        return None
+        # todo fallback to source to be removed
+        return self.source
 
     def extract_general_entities(self, task_data: str, language: str = 'dutch', method: str = 'regex') -> list[dict[str, Any]]:
         """
@@ -272,7 +273,6 @@ class EntityExtractionTask(DecisionTask):
 
         return entities
 
-
     def process(self):
         eli_expression = self.fetch_data()
         self.logger.info(eli_expression)
@@ -283,13 +283,13 @@ class EntityExtractionTask(DecisionTask):
 
         # Uses defaults from ner_config.py: language='dutch', method='regex'
         # Language can be passed in future when extracted from database
-        # todo fallback to source to be removed
-        uri_of_translation_expr = self.create_en_translation(eli_expression) or self.source
-        entities = self.extract_general_entities(eli_expression)
+        uri_of_translation_expr = self.create_en_translation(eli_expression)
+        #entities = self.extract_general_entities(eli_expression, language)
 
         # todo to be improved upon a lot by inserting functions to create the other predicates
         # ELI properties
-        self.create_title_relation(uri_of_translation_expr, entities)        
+        entities = extract_entities(eli_expression, language=language, method='title')
+        self.create_title_relation(uri_of_translation_expr, entities)
 
 
 class ModelAnnotatingTask(DecisionTask):

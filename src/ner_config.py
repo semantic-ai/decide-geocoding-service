@@ -8,9 +8,9 @@ used by the NER extraction system.
 # Model Configuration
 NER_MODELS = {
     'spacy': {
-        'dutch': 'nl_core_news_sm',
-        'german': 'de_core_news_sm',
-        'english': 'en_core_web_sm'
+        'nl': 'nl_core_news_sm',
+        'de': 'de_core_news_sm',
+        'en': 'en_core_web_sm'
     },
     'title_extraction': {
         'model': 'javdrher/decide-gemma3-270m',
@@ -21,7 +21,7 @@ NER_MODELS = {
 # Language-specific regex patterns organized by pattern type
 # This structure allows easy extension: just add new pattern types like 'person', 'address', etc.
 REGEX_PATTERNS = {
-    'german': 
+    'de':
     {
         'date': [
         # 02.04.2025 or 2.4.2025
@@ -33,7 +33,7 @@ REGEX_PATTERNS = {
         # April 2025 (month-year)
         r"\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b"
     ]},
-    'dutch': {
+    'nl': {
         'date': [
         # 02.04.2025 or 2.4.2025
         r"\b([0-3]?\d)\.([0-1]?\d)\.(\d{4})\b",
@@ -60,7 +60,7 @@ TITLE_EXTRACTION_INSTRUCTION = """
 
 # Default extraction settings
 DEFAULT_SETTINGS = {
-    'language': 'dutch',
+    'language': 'nl',
     'method': 'regex',
     'deduplicate': True,
     'min_confidence': 0.5,

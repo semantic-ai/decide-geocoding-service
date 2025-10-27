@@ -116,7 +116,7 @@ class ModelManager:
                     "text-generation",
                     model=model,
                     tokenizer=tokenizer,
-                    device="cpu"
+                    #device="cpu"
                 )
                 print(f"Successfully loaded title extraction model")
             except Exception as e:
