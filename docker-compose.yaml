@@ -26,6 +26,9 @@ services:
       MU_SPARQL_ENDPOINT: http://app-decide-virtuoso-1:8890/sparql
       NOMINATIM_BASE_URL: http://nominatim:8080
       NER_LABELS: '["CITY", "DOMAIN", "HOUSENUMBERS", "INTERSECTION", "POSTCODE", "PROVINCE", "ROAD", "STREET"]'
+      OPENAI_API_KEY: 'sk-SECRET-PART'
+      LLM_MODEL_NAME: 'gpt-4o-mini'
+      LLM_TEMPERATURE: 0.1
     volumes:
       - ./:/app
 

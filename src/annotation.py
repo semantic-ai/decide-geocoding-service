@@ -78,11 +78,11 @@ class LinkingAnnotation(Annotation):
           ?annotation a oa:Annotation ;
                        oa:hasTarget ?target .
           ?annotation oa:hasBody ?body.
-          OPTIONAL { ?annotation oa:motivation ?motivation . }
+          OPTIONAL { ?annotation oa:motivatedBy ?motivation . }
 
           # Example filter (uncomment and edit as needed):
           FILTER(?target = $uri)
-          FILTER(?motivation = "linking")
+          FILTER(?motivation = oa:classifying)
 
           OPTIONAL {
               ?activity a prov:Activity ;
@@ -104,7 +104,7 @@ class LinkingAnnotation(Annotation):
             yield
 
         for item in query_result['results']['bindings']:
-            yield cls(item['activity']['value'], uri, item['body']['value'], item['agent']['value'], item['agentType']['value'])
+            yield cls(item['activity']['value'], uri, item['body']['value'], item['agent']['value'], item.get('agentType', {}).get('value'))
 
     def to_labelstudio_result(self):
         return {
@@ -127,7 +127,7 @@ class LinkingAnnotation(Annotation):
                                  mu:uuid "$id";
                                  oa:hasBody $clz ;
                                  nif:confidence 1 ;
-                                 oa:motivation "linking" ;
+                                 oa:motivatedBy oa:classifying ;
                                  oa:hasTarget $uri .
               }
             } WHERE {
@@ -135,7 +135,7 @@ class LinkingAnnotation(Annotation):
                   FILTER NOT EXISTS { 
                     ?existingAnn a oa:Annotation ;
                         oa:hasBody $clz ;
-                        oa:motivation "linking" ;
+                        oa:motivatedBy oa:classifying ;
                         oa:hasTarget $uri .
     
                     ?existingAct a prov:Activity ;
@@ -150,8 +150,8 @@ class LinkingAnnotation(Annotation):
             annotation_id=sparql_escape_uri("http://example.org/{0}".format(uuid.uuid4())),
             activity_id=sparql_escape_uri(self.activity_id),
             uri=sparql_escape_uri(self.source_uri),
-            user=self.agent,
-            clz=" , ".join(map(sparql_escape_uri, self.class_uri))
+            user=sparql_escape_uri(self.agent),
+            clz=sparql_escape_uri(self.class_uri)
         )
         query(query_string)
 
@@ -179,11 +179,11 @@ class NERAnnotation(Annotation):
           ?selector a oa:TextPositionSelector ;
                   oa:start ?start; oa:end ?end .
           ?annotation oa:hasBody ?body.
-          OPTIONAL { ?annotation oa:motivation ?motivation . }
+          OPTIONAL { ?annotation oa:motivatedBy ?motivation . }
 
           # Example filter (uncomment and edit as needed):
           FILTER(?source = $uri)
-          FILTER(?motivation = "classifying")
+          FILTER(?motivation = oa:tagging)
 
           OPTIONAL {
               ?activity a prov:Activity ;
@@ -200,8 +200,8 @@ class NERAnnotation(Annotation):
             )
         )
         for item in query_result['results']['bindings']:
-            yield cls(item['activity']['value'], uri, item['body']['value'], item['start']['value'],
-                      item['end']['value'], item['agent']['value'], item['agentType']['value'])
+            yield cls(item['activity']['value'], uri, item['body']['value'], int(item['start']['value']),
+                      int(item['end']['value']), item['agent']['value'], item.get('agentType', {}).get('value'))
 
     def to_labelstudio_result(self):
         return {
@@ -224,7 +224,7 @@ class NERAnnotation(Annotation):
                                  mu:uuid "$id";
                                  oa:hasBody $clz ;
                                  nif:confidence 1 ;
-                                 oa:motivation "classifying" ;
+                                 oa:motivatedBy oa:tagging ;
                                  oa:hasTarget $part_of_id .
     
                   $part_of_id a oa:SpecificResource ;
@@ -242,7 +242,7 @@ class NERAnnotation(Annotation):
                   FILTER NOT EXISTS {
                     ?existingAnn a oa:Annotation ;
                         oa:hasBody $clz ;
-                        oa:motivation "classifying" ;
+                        oa:motivatedBy oa:tagging ;
                         oa:hasTarget ?existingTarget .
     
                     ?existingAct a prov:Activity ;
@@ -267,8 +267,8 @@ class NERAnnotation(Annotation):
             selector_id=sparql_escape_uri("http://www.example.org/id/.well-known/genid/{0}".format(uuid.uuid4())),
             part_of_id=sparql_escape_uri("http://www.example.org/id/.well-known/genid/{0}".format(uuid.uuid4())),
             uri=sparql_escape_uri(self.source_uri),
-            start=self.start,
-            end=self.end,
+            start=sparql_escape_int(self.start),
+            end=sparql_escape_int(self.end),
             user=sparql_escape_uri(self.agent),
             clz=sparql_escape_uri(self.class_uri),
             extra=self.get_extra_inserts()
@@ -331,11 +331,11 @@ class TripletAnnotation(NERAnnotation):
                           oa:start ?start; oa:end ?end .
                   ?annotation oa:hasBody ?body.
                   ?body a rdf:Statement ; rdf:subject ?subj; rdf:predicate ?pred; rdf:object ?obj .
-                  OPTIONAL { ?annotation oa:motivation ?motivation . }
+                  OPTIONAL { ?annotation oa:motivatedBy ?motivation . }
 
                   # Example filter (uncomment and edit as needed):
                   FILTER(?source = $uri)
-                  FILTER(?motivation = "relation-extraction")
+                  FILTER(?motivation = oa:linking)
 
                   OPTIONAL {
                       ?activity a prov:Activity ;
@@ -353,7 +353,7 @@ class TripletAnnotation(NERAnnotation):
         )
         for item in query_result['results']['bindings']:
             yield cls(item['subj']['value'], item['pred']['value'], item['obj']['value'], item['activity']['value'], uri,
-                      item['start']['value'], item['end']['value'], item['agent']['value'], item.get('agentType', {}).get('value'))
+                      int(item['start']['value']), int(item['end']['value']), item['agent']['value'], item.get('agentType', {}).get('value'))
 
     def add_to_triplestore(self):
         query_template = Template(
@@ -369,7 +369,7 @@ class TripletAnnotation(NERAnnotation):
                      mu:uuid "$id";
                      oa:hasBody $skolem ;
                      nif:confidence 1 ;
-                     oa:motivation "relation-extraction" ;
+                     oa:motivatedBy oa:linking ;
                      oa:hasTarget $part_of_id .
                                  
                   $skolem a rdf:Statement ;
@@ -390,7 +390,7 @@ class TripletAnnotation(NERAnnotation):
                   FILTER NOT EXISTS { 
                     ?existingAnn a oa:Annotation ;
                         oa:hasBody ?existingSkolem ;
-                        oa:motivation "relation-extraction" ;
+                        oa:motivatedBy oa:linking ;
                         oa:hasTarget ?existingTarget .
 
                     ?existingAct a prov:Activity ;
@@ -425,7 +425,7 @@ class TripletAnnotation(NERAnnotation):
             obj=sparql_escape_string(self.object),
             selector_id=sparql_escape_uri("http://www.example.org/id/.well-known/genid/{0}".format(uuid.uuid4())),
             part_of_id=sparql_escape_uri("http://www.example.org/id/.well-known/genid/{0}".format(uuid.uuid4())),
-            start=self.start,
-            end=self.end
+            start=sparql_escape_int(self.start),
+            end=sparql_escape_int(self.end)
         )
         query(query_string)
