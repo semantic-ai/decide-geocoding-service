@@ -1,173 +1,99 @@
 import uuid
-
 import pytz
-from huggingface_hub import CommitInfo
-from rdflib import Graph, URIRef, Literal, Namespace
-import git
-from rdflib.namespace import RDF, XSD
-import datetime
+from string import Template
+from datetime import datetime
+from escape_helpers import sparql_escape_uri, sparql_escape_string, sparql_escape_float, sparql_escape_datetime
+from ..sparql_config import get_prefixes_for_query, GRAPHS
 
 
-def write_airo_ai_model(hub_model_id: str, commit_info: CommitInfo, results: dict) -> Graph:
-    """
-    Write AIRO AI Model RDF graph based on the LBLOD AI Blueprint.
+def build_airo_model_insert_query(
+    hub_model_id: str,
+    commit_oid: str,
+    code_git_sha: str,
+    hf_repo_url: str,
+    hf_tree_url: str,
+    source_repo_url: str,
+    results: dict,
+    base: str = "http://example.com",
+) -> str:
+    prefixes = get_prefixes_for_query(
+        "dcterms", "ns1", "ns2", "ns3", "schema", "xsd", "rdf")
 
-    Args:
-        hub_model_id (str): The model ID on Hugging Face Hub.
-        commit_info (CommitInfo): The commit information from HF Git (after model push).
-        results (dict): A dictionary of evaluation metrics.
-    """
-    g = Graph()
-    AIRO = Namespace('https://w3id.org/airo#')
-    DQV = Namespace('http://www.w3.org/ns/dqv#')
-    DCT = Namespace('http://purl.org/dc/terms/')
-    SD = Namespace('https://w3id.org/okn/o/sd#')
-    SCHEMA = Namespace('https://schema.org/')
+    model_uri = f"{base}/model/{hub_model_id}"
+    version_uri = f"{base}/version/{commit_oid}"
+    code_uri = f"{base}/code/{commit_oid}"
+    input_uri = f"{base}/modelinput/text"
+    modelfiles_uri = f"{base}/modelfiles/{hub_model_id}"
+    source_code_uri = f"{base}/sourcecode/lblod-text-classifier"
 
-    model_uri = URIRef("http://example.com/model/{0}".format(hub_model_id))
-    repo = git.Repo(search_parent_directories=True)
+    published_literal = sparql_escape_datetime(
+        datetime.now(tz=pytz.timezone("Europe/Brussels"))
+    )
 
-    g.add((
-        model_uri,
-        DCT.title,
-        Literal(hub_model_id, datatype=XSD.string)
-    ))
+    qm_uris = []
+    qm_nodes_parts = []
+    for metric_name, metric_value in results.items():
+        qm_uri = f"{base}/qualitymeasurement/{uuid.uuid4()}"
+        metric_uri = f"{base}/metric/{metric_name}"
+        qm_uris.append(sparql_escape_uri(qm_uri))
+        qm_nodes_parts.append(f"""
+  {sparql_escape_uri(qm_uri)} ns1:isMeasurementOf {sparql_escape_uri(metric_uri)} ;
+      ns1:value {sparql_escape_float(metric_value)} .""")
 
-    g.add((
-        model_uri,
-        SD.dataPublished,
-        Literal(datetime.datetime.now(tz=pytz.timezone(
-            "Europe/Brussels")).isoformat(), datatype=XSD.dateTime)
-    ))
+    qm_list = ",\n        ".join(qm_uris) if qm_uris else ""
+    qm_nodes = "".join(qm_nodes_parts)
 
-    g.add((
-        model_uri,
-        RDF.type,
-        AIRO.AIModel
-    ))
+    tpl = Template(prefixes + """
+INSERT DATA {
+  GRAPH ${graph_uri} {  
+    ${model_uri} a ns3:AIModel ;
+        dcterms:source ${hf_tree_anyuri} ;
+        dcterms:title ${hub_model_id_str} ;
+        ${qm_line}
+        ns3:hasInput ${input_uri} ;
+        ns3:hasVersion ${version_uri} ;
+        ns2:dataPublished ${published_literal} ;
+        ns2:hasVersion ${code_uri} .
 
-    g.add((
-        model_uri,
-        DCT.source,
-        Literal(commit_info, datatype=XSD.anyURI)
-    ))
+    ${code_uri} a ns2:SoftwareVersion ;
+        ns2:hasSourceCode ${source_code_uri} ;
+        ns2:hasVersionId ${code_git_sha_str} .
 
-    g.add((
-        model_uri,
-        AIRO.hasInput,
-        URIRef("http://example.com/modelinput/text")
-    ))
+    ${modelfiles_uri} a ns2:SourceCode ;
+        schema:codeRepository ${hf_repo_anyuri} .
 
-    g.add((
-        URIRef("http://example.com/modelinput/text"),
-        DCT.type,
-        Literal("string", datatype=XSD.string)
-    ))
+    ${input_uri} dcterms:type ${input_type_str} .
 
-    for k, v in results.items():
-        quality_metric_id = URIRef(
-            "http://example.com/qualitymeasurement/{0}".format(str(uuid.uuid4())))
-        metric_id = URIRef("http://example.com/metric/{0}".format(k))
-        g.add((
-            model_uri,
-            DQV.QualityMeasurement,
-            quality_metric_id
-        ))
+    ${source_code_uri} a ns2:SourceCode ;
+        schema:codeRepository ${source_repo_anyuri} .
 
-        g.add((
-            quality_metric_id,
-            DQV.value,
-            Literal(v, datatype=XSD.double)
-        ))
+    ${version_uri} a ns3:Version ;
+        ns2:hasSourceCode ${modelfiles_uri} ;
+        ns2:hasVersionId ${commit_oid_str} .
 
-        g.add((
-            quality_metric_id,
-            DQV.isMeasurementOf,
-            metric_id
-        ))
+${qm_nodes}
+  }
+}
+""")
 
-    version_uri = URIRef(
-        "http://example.com/version/{0}".format(commit_info.oid))
+    query = tpl.substitute(
+        graph_uri=sparql_escape_uri(GRAPHS["ai"]),
+        model_uri=sparql_escape_uri(model_uri),
+        hf_tree_anyuri=sparql_escape_uri(hf_tree_url),
+        hub_model_id_str=sparql_escape_string(hub_model_id),
+        qm_line=(f"ns1:QualityMeasurement {qm_list} ;" if qm_list else ""),
+        input_uri=sparql_escape_uri(input_uri),
+        version_uri=sparql_escape_uri(version_uri),
+        published_literal=published_literal,
+        code_uri=sparql_escape_uri(code_uri),
+        source_code_uri=sparql_escape_uri(source_code_uri),
+        code_git_sha_str=sparql_escape_string(code_git_sha),
+        modelfiles_uri=sparql_escape_uri(modelfiles_uri),
+        hf_repo_anyuri=sparql_escape_uri(hf_repo_url),
+        input_type_str=sparql_escape_string("string"),
+        source_repo_anyuri=sparql_escape_uri(source_repo_url),
+        commit_oid_str=sparql_escape_string(commit_oid),
+        qm_nodes=qm_nodes
+    )
 
-    g.add((
-        model_uri,
-        AIRO.hasVersion,
-        version_uri,
-    ))
-
-    g.add((
-        version_uri,
-        RDF.type,
-        AIRO.Version
-    ))
-
-    g.add((
-        version_uri,
-        SD.hasVersionId,
-        Literal(commit_info.oid, datatype=XSD.string),
-    ))
-
-    model_files_uri = URIRef(
-        "http://example.com/modelfiles/{0}".format(hub_model_id))
-
-    g.add((
-        version_uri,
-        SD.hasSourceCode,
-        model_files_uri,
-    ))
-
-    g.add((
-        model_files_uri,
-        SCHEMA.codeRepository,
-        Literal(commit_info.repo_url.url, datatype=XSD.anyURI)
-    ))
-
-    g.add((
-        model_files_uri,
-        RDF.type,
-        SD.SourceCode
-    ))
-
-    code_uri = URIRef(
-        "http://example.com/code/{0}".format(repo.head.object.hexsha))
-
-    g.add((
-        model_uri,
-        SD.hasVersion,
-        code_uri
-    ))
-
-    g.add((
-        code_uri,
-        RDF.type,
-        SD.SoftwareVersion
-    ))
-
-    g.add((
-        code_uri,
-        SD.hasVersionId,
-        Literal(repo.head.object.hexsha, datatype=XSD.string)
-    ))
-
-    source_code_uri = URIRef(
-        "http://example.com/sourcecode/lblod-text-classifier")
-
-    g.add((
-        code_uri,
-        SD.hasSourceCode,
-        source_code_uri,
-    ))
-
-    g.add((
-        source_code_uri,
-        SCHEMA.codeRepository,
-        Literal(repo.remote().url, datatype=XSD.anyURI)
-    ))
-
-    g.add((
-        source_code_uri,
-        RDF.type,
-        SD.SourceCode
-    ))
-
-    return g
+    return query

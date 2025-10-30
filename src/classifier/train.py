@@ -1,10 +1,12 @@
 import os
+import git
 import fire
 from huggingface_hub import login
 from .data import get_dataset_cls
 from .metrics import get_metric_cls
-from .ld import write_airo_ai_model
+from .ld import build_airo_model_insert_query
 
+from helpers import query
 from transformers import AutoTokenizer, DataCollatorWithPadding, AutoModelForSequenceClassification, TrainingArguments, Trainer, pipeline
 
 
@@ -82,14 +84,25 @@ def train(
     trainer.train()
 
     # Push best model to hub and evaluate metrics
-    model_url = trainer.push_to_hub(blocking=True)
+    commit_info = trainer.push_to_hub(blocking=True)
     results = trainer.evaluate()
 
-    # Generate LD metadata
-    graph = write_airo_ai_model(model_id, model_url, results)
+    repo = git.Repo(search_parent_directories=True)
 
-    with open("model-metadata.ttl", "w") as f:
-        f.write(graph.serialize(format="turtle"))
+    # Build SPARQL INSERT query
+    query_str = build_airo_model_insert_query(
+        hub_model_id=model_id,
+        commit_oid=commit_info.oid,
+        code_git_sha=repo.head.object.hexsha,
+        hf_repo_url=commit_info.repo_url.url,
+        hf_tree_url=f"{commit_info.repo_url.url}/tree/main/",
+        source_repo_url=repo.remote().url,
+        results=results
+    )
+
+    # query(query_str)
+
+    print(query_str, flush=True)
 
 
 if __name__ == "__main__":

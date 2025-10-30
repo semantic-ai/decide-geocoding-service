@@ -33,7 +33,11 @@ SPARQL_PREFIXES = {
     "adms": "http://www.w3.org/ns/adms#",
     "task": "http://lblod.data.gift/vocabularies/tasks/",
     "nfo": "http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#",
-    "eli": "http://data.europa.eu/eli/ontology#"
+    "eli": "http://data.europa.eu/eli/ontology#",
+    "ns1": "http://www.w3.org/ns/dqv#",
+    "ns2": "https://w3id.org/okn/o/sd#",
+    "ns3": "https://w3id.org/airo#",
+    "schema": "https://schema.org/",
 }
 
 # ==============================================================================
