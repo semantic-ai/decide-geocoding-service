@@ -32,7 +32,8 @@ SPARQL_PREFIXES = {
     "skos": "http://www.w3.org/2004/02/skos/core#",
     "adms": "http://www.w3.org/ns/adms#",
     "task": "http://lblod.data.gift/vocabularies/tasks/",
-    "nfo": "http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#"
+    "nfo": "http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#",
+    "eli": "http://data.europa.eu/eli/ontology#"
 }
 
 # ==============================================================================
@@ -73,6 +74,8 @@ JOB_STATUSES = {
 TASK_OPERATIONS = {
     "entity_extraction": "http://lblod.data.gift/id/jobs/concept/TaskOperation/entity-extracting",
     "model_annotation": "http://lblod.data.gift/id/jobs/concept/TaskOperation/model-annotating",
+    "model_batch_annotation": "http://lblod.data.gift/id/jobs/concept/TaskOperation/model-batch-annotating",
+    "classifier_training": "http://lblod.data.gift/id/jobs/concept/TaskOperation/classifier-training",
     "geo_extraction": "http://lblod.data.gift/id/jobs/concept/TaskOperation/geo-extracting",
 }
 
@@ -91,7 +94,7 @@ AGENT_TYPES = {
 
 AI_COMPONENTS = {
     "ner_extractor": "http://example.org/entity-extraction",
-    "entity_linker": "http://example.org/entity-linking",
+    "model_annotater": "http://example.org/model_annotation",
     "decide_system": "http://example.org/DECIDe",
 }
 

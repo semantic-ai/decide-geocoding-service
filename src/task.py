@@ -18,6 +18,7 @@ from .annotation import GeoAnnotation, LinkingAnnotation, TripletAnnotation
 from .sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES
 from .llm_models.llm_model_clients import OpenAIModel
 from .llm_models.llm_task_models import LlmTaskInput, EntityLinkingTaskOutput
+from .classifier.train import train
 
 
 class Task(ABC):
@@ -274,16 +275,21 @@ class ModelAnnotatingTask(DecisionTask):
     
     __task_type__ = TASK_OPERATIONS["model_annotation"]
 
-    def __init__(self, task_uri: str):
-        super().__init__(task_uri)
+    def __init__(self, task_uri: str, source: str | None = None):
+        if source is None:
+            super().__init__(task_uri)
+        else:
+            self.task_uri = task_uri
+            self.logger = logging.getLogger(self.__class__.__name__)
+            self.source = source
 
         self._llm_config = {
             "model_name": os.getenv("LLM_MODEL_NAME"),
             "temperature": float(os.getenv("LLM_TEMPERATURE")),
         }
 
-        self._llm_system_message = "You are a juridical and administrative assistant that must determine the best matching code from a list with a given text."
-        self._llm_user_message = "Determine the best matching code from the following list for the given public decision.\n\n" \
+        self._llm_system_message = "You are a juridical and administrative assistant that must determine the best matching codes from a list with a given text."
+        self._llm_user_message = "Determine the best matching codes from the following list for the given public decision.\n\n" \
             "\"\"\"" \
             "CODE LIST:\n" \
             "{code_list}\n" \
@@ -292,7 +298,7 @@ class ModelAnnotatingTask(DecisionTask):
             "DECISION TEXT:\n" \
             "{decision_text}\n" \
             "\"\"\"" \
-            "Answer only and solely with one of the given codes!"
+            "Provide your answer as a list of strings representing the matching codes. Provide all matching codes (can be a single one), but only those that are truly matching and only from the given list!"
 
         self._llm = OpenAIModel(self._llm_config)
 
@@ -301,23 +307,23 @@ class ModelAnnotatingTask(DecisionTask):
         self.logger.info(task_data)
 
         # TO DO: ADD FUNCTION TO RETRIEVE ACTUAL CODE LIST
-        sdgs = ["No Poverty",
-                "Zero Hunger",
-                "Good Health and Well-Being",
-                "Quality Education",
-                "Gender Equality",
-                "Clean Water and Sanitation",
-                "Affordable and Clean Energy",
-                "Decent Work and Economic Growth",
-                "Industry, Innovation and Infrastructure",
-                "Reduced Inequalities",
-                "Sustainable Cities and Communities",
-                "Responsible Consumption and Production",
-                "Climate Action",
-                "Life Below Water",
-                "Life on Land",
-                "Peace, Justice and Strong Institutions",
-                "Partnerships for the Goals"
+        sdgs = ["SDG-01 No Poverty",
+                "SDG-02 Zero Hunger",
+                "SDG-03 Good Health and Well-Being",
+                "SDG-04 Quality Education",
+                "SDG-05 Gender Equality",
+                "SDG-06 Clean Water and Sanitation",
+                "SDG-07 Affordable and Clean Energy",
+                "SDG-08 Decent Work and Economic Growth",
+                "SDG-09 Industry, Innovation and Infrastructure",
+                "SDG-10 Reduced Inequality",
+                "SDG-11 Sustainable Cities and Communities",
+                "SDG-12 Responsible Consumption and Production",
+                "SDG-13 Climate Action",
+                "SDG-14 Life Below Water",
+                "SDG-16 Life on Land",
+                "SDG-16 Peace, Justice and Strong Institutions",
+                "SDG-17 Partnerships for the Goals"
                 ]
 
         llm_input = LlmTaskInput(system_message=self._llm_system_message,
@@ -327,14 +333,166 @@ class ModelAnnotatingTask(DecisionTask):
                                  output_format=EntityLinkingTaskOutput)
 
         response = self._llm(llm_input)
+        classes = [designated_class.replace(" ", "_") for designated_class in response.designated_classes]
 
-        annotation = LinkingAnnotation(
-            self.task_uri,
-            self.source,
-            # TO DO: CHANGE TO ACTUAL URI
-            "http://example.org/" +
-            response.designated_class.replace(" ", "_"),
-            AI_COMPONENTS["entity_linker"],
-            AGENT_TYPES["ai_component"]
-        )
-        annotation.add_to_triplestore()
+        for c in classes:
+            annotation = LinkingAnnotation(
+                self.task_uri,
+                self.source,
+                # TO DO: CHANGE TO ACTUAL URI
+                "http://example.org/" + c,
+                AI_COMPONENTS["model_annotater"],
+                AGENT_TYPES["ai_component"]
+            )
+            annotation.add_to_triplestore()
+
+
+class ModelBatchAnnotatingTask(Task, ABC):
+    """Task that creates ModelAnnotatingTasks for all decisions that are not yet annotated."""
+
+    __task_type__ = TASK_OPERATIONS["model_batch_annotation"]
+
+    def __init__(self, task_uri: str):
+        super().__init__(task_uri)
+
+    def process(self):
+        decision_uris = self.fetch_decisions_without_annotations()
+        print(f"{len(decision_uris)} decisions to process.", flush=True)
+
+        for i, decision_uri in enumerate(decision_uris):
+            ModelAnnotatingTask(self.task_uri, decision_uri).process()
+            print(f"Processed decision {i+1}/{len(decision_uris)}: {decision_uri}", flush=True)
+
+    def fetch_decisions_without_annotations(self) -> list[str]:
+        q = get_prefixes_for_query("rdf", "eli", "oa") + \
+            """
+            SELECT DISTINCT ?s
+            WHERE {
+                GRAPH <http://mu.semte.ch/graphs/oslo-temp> {
+                    ?s rdf:type eli:Expression .
+                }
+                FILTER NOT EXISTS {
+                    GRAPH <http://mu.semte.ch/graphs/ai> {
+                    ?ann a oa:Annotation ;
+                        oa:hasTarget ?s ;
+                        oa:motivatedBy oa:classifying .
+                    }
+                }
+            }
+            """
+        
+        response = query(q)
+        bindings = response.get("results", {}).get("bindings", [])
+        decision_uris = [b["s"]["value"] for b in bindings if "s" in b]
+
+        return decision_uris
+    
+
+class ClassifierTrainingTask(Task, ABC):
+    """Task that trains a classifier for the available annotations in the triple store."""
+
+    __task_type__ = TASK_OPERATIONS["classifier_training"]
+
+    def __init__(self, task_uri: str):
+        super().__init__(task_uri)
+
+    def process(self):
+        decisions = self.fetch_decisions_with_classes()
+        decisions = self.convert_classes_to_original_names(decisions)
+
+        # TO DO: ADD FUNCTION TO RETRIEVE ACTUAL CODE LIST
+        sdgs = ["SDG-01 No Poverty",
+                "SDG-02 Zero Hunger",
+                "SDG-03 Good Health and Well-Being",
+                "SDG-04 Quality Education",
+                "SDG-05 Gender Equality",
+                "SDG-06 Clean Water and Sanitation",
+                "SDG-07 Affordable and Clean Energy",
+                "SDG-08 Decent Work and Economic Growth",
+                "SDG-09 Industry, Innovation and Infrastructure",
+                "SDG-10 Reduced Inequality",
+                "SDG-11 Sustainable Cities and Communities",
+                "SDG-12 Responsible Consumption and Production",
+                "SDG-13 Climate Action",
+                "SDG-14 Life Below Water",
+                "SDG-16 Life on Land",
+                "SDG-16 Peace, Justice and Strong Institutions",
+                "SDG-17 Partnerships for the Goals"
+                ]
+        
+        kwargs = {}
+
+        if os.getenv("TRANSFORMER_NAME"):
+            kwargs["transformer"] = os.getenv("TRANSFORMER_NAME")
+
+        if os.getenv("LEARNING_RATE"):
+            kwargs["learning_rate"] = float(os.getenv("LEARNING_RATE"))
+
+        if os.getenv("EPOCHS"):
+            kwargs["epochs"] = int(os.getenv("EPOCHS"))
+
+        if os.getenv("WEIGHT_DECAY"):
+            kwargs["weight_decay"] = float(os.getenv("WEIGHT_DECAY"))
+
+        print("Started training...", flush=True)
+        train(decisions[:10],
+              sdgs, 
+              os.getenv("HUGGINGFACE_OUTPUT_MODEL_ID"),
+              **kwargs) 
+        print("Done training!", flush=True)
+
+    def convert_classes_to_original_names(self, decisions: list[dict[str, str | list[str]]]):
+        for decision in decisions:
+            decision["classes"] = [c.split("/")[-1].replace("_", " ") for c in decision["classes"]]
+
+        return decisions
+
+        
+    def fetch_decisions_with_classes(self) -> list[dict[str, str | list[str]]]:
+        q = get_prefixes_for_query("rdf", "eli", "oa") + \
+        """
+        SELECT ?decision ?title ?description ?decision_basis ?classes
+        WHERE {
+        {
+            SELECT ?decision (GROUP_CONCAT(DISTINCT STR(?body); separator="|") AS ?classes)
+            WHERE {
+                GRAPH <http://mu.semte.ch/graphs/ai> {
+                    ?ann a oa:Annotation ;
+                        oa:hasTarget ?decision ;
+                        oa:motivatedBy oa:classifying ;
+                        oa:hasBody ?body .
+                }
+            }
+            GROUP BY ?decision
+        }
+            GRAPH <http://mu.semte.ch/graphs/oslo-temp> {
+                ?decision rdf:type eli:Expression .
+                OPTIONAL { ?decision eli:title ?title }
+                OPTIONAL { ?decision eli:description ?description }
+                OPTIONAL { ?decision <http://data.europa.eu/eli/eli-dl#decision_basis> ?decision_basis }
+            }
+        }
+        """
+
+        res = query(q)
+        bindings = res.get("results", {}).get("bindings", [])
+
+        results = []
+        for b in bindings:
+            decision = b["decision"]["value"]
+            classes_concat = b.get("classes", {}).get("value", "")
+            classes = [c for c in classes_concat.split("|") if c]
+            title = b.get("title", {}).get("value", "")
+            description = b.get("description", {}).get("value", "")
+            decision_basis = b.get("decision_basis", {}).get("value", "")
+
+            text = "\n".join([t for t in [title, description, decision_basis] if t])
+
+            results.append({
+                "decision": decision,
+                "classes": classes,
+                "text": text
+            })
+
+        return results
+    

@@ -1,12 +1,16 @@
 spacy
-numpy~=1.26.4
+numpy
 pandas
 spacy-transformers
-huggingface_hub[cli]
 requests
 openai
--f https://download.pytorch.org/whl/torch_stable.html
-torch==2.3.1+cpu
+-f https://download.pytorch.org/whl/cpu
+torch
 flair
 transformers
 peft
+langdetect
+fire
+datasets
+rdflib
+gitpython
