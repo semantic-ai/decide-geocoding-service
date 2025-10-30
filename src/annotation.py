@@ -357,7 +357,7 @@ class TripletAnnotation(NERAnnotation):
 
     def add_to_triplestore(self):
         query_template = Template(
-            get_prefixes_for_query("ex", "oa", "mu", "prov", "foaf", "dct", "skolem", "nif", "rdf") +
+            get_prefixes_for_query("ex", "oa", "mu", "prov", "foaf", "dct", "skolem", "nif", "rdf", "eli") +
             """
             INSERT {
               GRAPH <""" + GRAPHS["ai"] + """> {
@@ -422,7 +422,7 @@ class TripletAnnotation(NERAnnotation):
             skolem=sparql_escape_uri("http://example.org/{0}".format(uuid.uuid4())),
             subject=sparql_escape_uri(self.subject),
             pred=self.class_uri,
-            obj=sparql_escape_string(self.object),
+            obj=self.object,
             selector_id=sparql_escape_uri("http://www.example.org/id/.well-known/genid/{0}".format(uuid.uuid4())),
             part_of_id=sparql_escape_uri("http://www.example.org/id/.well-known/genid/{0}".format(uuid.uuid4())),
             start=self.start,

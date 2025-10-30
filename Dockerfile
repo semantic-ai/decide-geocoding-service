@@ -9,8 +9,7 @@ RUN uv pip install https://github.com/explosion/spacy-models/releases/download/n
 RUN uv pip install https://github.com/explosion/spacy-models/releases/download/de_core_news_sm-3.8.0/de_core_news_sm-3.8.0-py3-none-any.whl
 RUN uv pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 
-RUN apt-get update 
-RUN apt-get install -y --no-install-recommends git 
+RUN uv pip install transformers==4.57.1
 
 ENV EXPECTED_TASK_PREDICATE=http://www.w3.org/ns/adms#status
 ENV EXPECTED_TASK_OBJECT=http://redpencil.data.gift/id/concept/JobStatus/scheduled
