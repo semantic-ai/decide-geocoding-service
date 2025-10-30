@@ -4,7 +4,7 @@ import os
 import json
 import langdetect
 from abc import ABC, abstractmethod
-from typing import Optional, Any
+from typing import Optional, Any, Type
 
 from uuid import uuid4
 from string import Template
@@ -31,18 +31,24 @@ class Task(ABC):
         self.logger = logging.getLogger(self.__class__.__name__)
 
     @classmethod
+    def supported_operations(cls) -> list[Type['Task']]:
+        all_ops = []
+        for subclass in cls.__subclasses__():
+            if hasattr(subclass, '__task_type__'):
+                all_ops.append(subclass)
+            else:
+                all_ops.extend(subclass.supported_operations())
+        return all_ops
+
+    @classmethod
     def lookup(cls, task_type: str) -> Optional['Task']:
         """
         Yield all subclasses of the given class, per:
         https://adamj.eu/tech/2024/05/10/python-all-subclasses/
         """
-        for subclass in cls.__subclasses__():
+        for subclass in cls.supported_operations():
             if hasattr(subclass, '__task_type__') and subclass.__task_type__ == task_type:
                 return subclass
-            else:
-                res = subclass.lookup(task_type)
-                if res is not None:
-                    return res
         return None
 
     @classmethod
