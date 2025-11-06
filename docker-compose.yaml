@@ -29,6 +29,10 @@ services:
       OPENAI_API_KEY: 'sk-SECRET-PART'
       LLM_MODEL_NAME: 'gpt-4o-mini'
       LLM_TEMPERATURE: 0.1
+      TRANSLATION_TARGET_LANG: 'en'
+      TRANSLATION_PROVIDER: 'huggingface'
+      EXPECTED_TASK_PREDICATE: 'http://www.w3.org/ns/adms#status'
+      EXPECTED_TASK_OBJECT: 'http://redpencil.data.gift/id/concept/JobStatus/scheduled'
     volumes:
       - ./:/app
 
