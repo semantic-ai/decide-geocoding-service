@@ -276,8 +276,17 @@ class EntityExtractionTask(DecisionTask):
         eli_expression = self.fetch_data()
         self.logger.info(eli_expression)
 
-        language = langdetect.detect(eli_expression)
-        # todo replace first argument with eli:expression uri
+        # whitespace-only content can crash langdetect
+        if not eli_expression or not eli_expression.strip():
+            self.logger.warning("No content available for language detection; skipping language annotation")
+            return
+
+        try:
+            language = langdetect.detect(eli_expression)
+        except Exception as e:
+            self.logger.warning(f"Language detection failed ({e}); defaulting to 'en'")
+            language = "en"
+
         self.create_language_relation(self.source, language)
 
         # Uses defaults from ner_config.py: language='dutch', method='regex'
@@ -523,11 +532,9 @@ class TranslationTask(DecisionTask):
             return
         
         # Retrieve source language from database (set by NER task)
-        # Pass content to avoid redundant fetch in fallback case
         source_language = self.retrieve_source_language(content=original_text)
         
         # Ensure we have an explicit source language
-        # If somehow "auto" was returned, detect it now
         if not source_language or source_language.lower() == "auto":
             self.logger.warning("Source language was 'auto' or missing, detecting from content...")
             try:
