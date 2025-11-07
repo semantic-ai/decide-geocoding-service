@@ -18,6 +18,7 @@ services:
       context: .
     ports:
       - "8082:80"
+      - "8888:8888"  # eTranslation callback port
     networks:
       - app-decide_default
     environment:
@@ -30,7 +31,17 @@ services:
       LLM_MODEL_NAME: 'gpt-4o-mini'
       LLM_TEMPERATURE: 0.1
       TRANSLATION_TARGET_LANG: 'en'
-      TRANSLATION_PROVIDER: 'huggingface'
+      TRANSLATION_PROVIDER: 'etranslation'
+      ETRANSLATION_USERNAME: ''
+      ETRANSLATION_PASSWORD: ''
+      ETRANSLATION_BASE_URL: 'https://language-tools.ec.europa.eu/etranslation/api'
+      ETRANSLATION_DOMAIN: 'GEN'
+      ETRANSLATION_TIMEOUT: '60'
+      ETRANSLATION_CALLBACK_TIMEOUT: '180'
+      ETRANSLATION_CALLBACK_HOST: '0.0.0.0'
+      ETRANSLATION_CALLBACK_PORT: '8888'
+      NGROK_AUTHTOKEN: ''
+      ETRANSLATION_CALLBACK_URL: ''
       EXPECTED_TASK_PREDICATE: 'http://www.w3.org/ns/adms#status'
       EXPECTED_TASK_OBJECT: 'http://redpencil.data.gift/id/concept/JobStatus/scheduled'
     volumes:

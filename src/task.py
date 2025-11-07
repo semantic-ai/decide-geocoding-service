@@ -396,9 +396,10 @@ class TranslationTask(DecisionTask):
                     "deepl": ("translatepy.translators.deepl", "DeeplTranslate", True),
                     "libre": ("translatepy.translators.libre", "LibreTranslate", True),
                     "huggingface": ("translation_plugin_huggingface", "HuggingFaceTranslateService", False),
+                    "etranslation": ("translation_plugin_etranslation", "ETRanslationService", False),
                 }
 
-                module_name, class_name, is_external = registry.get(provider, registry["huggingface"]) 
+                module_name, class_name, is_external = registry.get(provider, registry.get("etranslation", registry["huggingface"])) 
                 base_package = __package__ or "src"
                 module_path = module_name if is_external else f"{base_package}.{module_name}"
 
