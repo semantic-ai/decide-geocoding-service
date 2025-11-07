@@ -3,6 +3,7 @@ HuggingFace Translation Plugin for translatepy
 Uses Helsinki-NLP OPUS-MT models for high-quality translation.
 """
 
+import re
 import logging
 from transformers import MarianMTModel, MarianTokenizer
 
@@ -77,6 +78,94 @@ class HuggingFaceTranslateService(BaseTranslator):
             return language.alpha2 if hasattr(language, 'alpha2') else str(language)
         return str(language)
     
+    def _split_text_at_word_boundaries(self, text: str, tokenizer: MarianTokenizer, max_tokens: int = 512) -> list:
+        """
+        Split text into chunks at word boundaries, respecting token limits.
+        Ensures chunks don't exceed max_tokens and splits only at whitespace.
+        First tries sentence boundaries, then falls back to word boundaries.
+        Aligned with eTranslation chunking logic for consistency.
+        """
+        # First, try to split at sentence boundaries (periods, exclamation, question marks)
+        parts = re.split(r'(?<=[.!?])\s+', text)
+        chunks = []
+        cur = ""
+        
+        for p in parts:
+            if not cur:
+                cur = p
+            else:
+                # Check if adding this part would exceed token limit
+                test_text = cur + " " + p
+                token_count = len(tokenizer.encode(test_text, add_special_tokens=False))
+                
+                if token_count <= max_tokens:
+                    cur = test_text
+                else:
+                    # Check if the part itself exceeds limit (handle immediately like eTranslation)
+                    part_token_count = len(tokenizer.encode(p, add_special_tokens=False))
+                    if part_token_count > max_tokens:
+                        # Word-level fallback for oversized parts
+                        words = p.split()
+                        for w in words:
+                            # Safety check: if a single word exceeds limit, include it anyway
+                            word_token_count = len(tokenizer.encode(w, add_special_tokens=False))
+                            if word_token_count > max_tokens:
+                                # Save current chunk if exists
+                                if cur:
+                                    chunks.append(cur)
+                                    cur = ""
+                                # Add oversized word as its own chunk (will be truncated by tokenizer)
+                                chunks.append(w)
+                                continue
+                            
+                            if not cur:
+                                cur = w
+                            else:
+                                test_text = cur + " " + w
+                                token_count = len(tokenizer.encode(test_text, add_special_tokens=False))
+                                if token_count <= max_tokens:
+                                    cur = test_text
+                                else:
+                                    chunks.append(cur)
+                                    cur = w
+                    else:
+                        # Part fits alone, save current chunk and start new one
+                        chunks.append(cur)
+                        cur = p
+        
+        if cur:
+            chunks.append(cur)
+        
+        return chunks if chunks else [text]  # Ensure at least one chunk
+    
+    def _translate_chunked(self, text: str, tokenizer: MarianTokenizer, model: MarianMTModel, 
+                          src_lang: str, tgt_lang: str) -> str:
+        """Translate long text by chunking and combining results."""
+        chunks = self._split_text_at_word_boundaries(text, tokenizer, max_tokens=512)
+        
+        if len(chunks) == 1:
+            # Single chunk, translate directly
+            encoded = tokenizer(chunks[0], return_tensors="pt", padding=True, truncation=True, max_length=512)
+            translated = model.generate(**encoded, max_length=512)
+            return tokenizer.decode(translated[0], skip_special_tokens=True)
+        
+        self.logger.info(f"Chunking text into {len(chunks)} chunks for translation")
+        
+        translated_chunks = []
+        for i, chunk in enumerate(chunks, 1):
+            self.logger.debug(f"Translating chunk {i}/{len(chunks)} ({len(chunk)} chars)")
+            encoded = tokenizer(chunk, return_tensors="pt", padding=True, truncation=True, max_length=512)
+            translated = model.generate(**encoded, max_length=512)
+            translated_text = tokenizer.decode(translated[0], skip_special_tokens=True)
+            translated_chunks.append(translated_text)
+        
+        # Combine chunks with single space, then normalize whitespace
+        combined = " ".join(translated_chunks)
+        # Normalize multiple spaces to single space
+        combined = re.sub(r'\s+', ' ', combined).strip()
+        
+        return combined
+    
     def _translate(self, text: str, destination_language: str, source_language: str = "auto") -> str:
         src_lang = self._get_lang_code(source_language)
         tgt_lang = self._get_lang_code(destination_language)
@@ -85,14 +174,17 @@ class HuggingFaceTranslateService(BaseTranslator):
         
         model, tokenizer = self._load_model(src_lang, tgt_lang)
         
-        # Tokenize with truncation (MarianMT max ~512 tokens)
-        encoded = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+        # Check token count to determine if chunking is needed
+        token_count = len(tokenizer.encode(text, add_special_tokens=False))
         
-        # Generate translation
-        translated = model.generate(**encoded, max_length=512)
-        
-        # Decode
-        translation = tokenizer.decode(translated[0], skip_special_tokens=True)
+        if token_count > 512:
+            self.logger.info(f"Text exceeds token limit ({token_count} > 512), using chunking")
+            translation = self._translate_chunked(text, tokenizer, model, src_lang, tgt_lang)
+        else:
+            # Single chunk translation
+            encoded = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
+            translated = model.generate(**encoded, max_length=512)
+            translation = tokenizer.decode(translated[0], skip_special_tokens=True)
         
         self.logger.info(f"Translation completed: {len(translation)} characters")
         return translation
