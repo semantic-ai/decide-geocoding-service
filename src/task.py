@@ -233,8 +233,8 @@ class EntityExtractionTask(DecisionTask):
             obj=sparql_escape_uri(LANGUAGE_CODE_TO_URI.get(language)),
             activity_id=self.task_uri,
             source_uri=source_uri,
-            start=0,
-            end=0,
+            start=None,
+            end=None,
             agent=AI_COMPONENTS["ner_extractor"],
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore()
@@ -478,8 +478,8 @@ class TranslationTask(DecisionTask):
             obj=sparql_escape_uri(LANGUAGE_CODE_TO_URI[target_language]),
             activity_id=self.task_uri,
             source_uri=translation_annotation_uri,
-            start=0,
-            end=0,
+            start=None,
+            end=None,
             agent=AI_COMPONENTS["translator"],
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore()
@@ -503,8 +503,8 @@ class TranslationTask(DecisionTask):
             obj=sparql_escape_string(translated_text),
             activity_id=self.task_uri,
             source_uri=source_uri,
-            start=0,
-            end=0,
+            start=None,
+            end=None,
             agent=AI_COMPONENTS["translator"],
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore()

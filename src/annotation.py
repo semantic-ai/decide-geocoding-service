@@ -159,7 +159,7 @@ class LinkingAnnotation(Annotation):
 class NERAnnotation(Annotation):
     """Named Entity Recognition annotation with text position selectors."""
     
-    def __init__(self, activity_id: str, source_uri: str, class_uri: str, start: int, end: int, agent: str, agent_type: str):
+    def __init__(self, activity_id: str, source_uri: str, class_uri: str, start: Optional[int], end: Optional[int], agent: str, agent_type: str):
         super().__init__(activity_id, source_uri, agent, agent_type)
         self.class_uri = class_uri
         self.start = start
@@ -175,9 +175,12 @@ class NERAnnotation(Annotation):
           ?annotation a oa:Annotation ;
                        oa:hasTarget ?target .
           ?target a oa:SpecificResource ;
-                  oa:source ?source; oa:selector ?selector .
-          ?selector a oa:TextPositionSelector ;
-                  oa:start ?start; oa:end ?end .
+                  oa:source ?source .
+          OPTIONAL {
+              ?target oa:selector ?selector .
+              ?selector a oa:TextPositionSelector ;
+                      oa:start ?start; oa:end ?end .
+          }
           ?annotation oa:hasBody ?body.
           OPTIONAL { ?annotation oa:motivatedBy ?motivation . }
 
@@ -200,8 +203,10 @@ class NERAnnotation(Annotation):
             )
         )
         for item in query_result['results']['bindings']:
-            yield cls(item['activity']['value'], uri, item['body']['value'], item['start']['value'],
-                      item['end']['value'], item['agent']['value'], item['agentType']['value'])
+            start_val = int(item['start']['value']) if item.get('start') else None
+            end_val = int(item['end']['value']) if item.get('end') else None
+            yield cls(item['activity']['value'], uri, item['body']['value'], start_val,
+                      end_val, item['agent']['value'], item['agentType']['value'])
 
     def to_labelstudio_result(self):
         return {
@@ -211,6 +216,8 @@ class NERAnnotation(Annotation):
         }
 
     def add_to_triplestore(self):
+        selector_part, selector_filter, selector_id, start_val, end_val = self._build_selector_parts()
+        
         query_template = Template(
             get_prefixes_for_query("ex", "oa", "mu", "prov", "foaf", "dct", "skolem", "nif", "locn", "geosparql") +
             """
@@ -227,13 +234,7 @@ class NERAnnotation(Annotation):
                                  oa:motivatedBy oa:tagging ;
                                  oa:hasTarget $part_of_id .
     
-                  $part_of_id a oa:SpecificResource ;
-                              oa:source $uri ;
-                              oa:selector $selector_id .
-    
-                  $selector_id a oa:TextPositionSelector ;
-                               oa:start $start ;
-                               oa:end $end .
+                  $selector_part
                                
                   $extra
               }
@@ -249,13 +250,7 @@ class NERAnnotation(Annotation):
                      prov:generated ?existingAnn ;
                      prov:wasAssociatedWith $user .
     
-                    ?existingTarget a oa:SpecificResource ;
-                        oa:source $uri ;
-                        oa:selector ?existingSelector .
-    
-                    ?existingSelector a oa:TextPositionSelector ;
-                          oa:start $start ;
-                          oa:end $end .
+                    $selector_filter
                   }
               }
             }
@@ -264,17 +259,57 @@ class NERAnnotation(Annotation):
             id=str(uuid.uuid1()),
             annotation_id=sparql_escape_uri("http://example.org/{0}".format(uuid.uuid4())),
             activity_id=sparql_escape_uri(self.activity_id),
-            selector_id=sparql_escape_uri("http://www.example.org/id/.well-known/genid/{0}".format(uuid.uuid4())),
+            selector_id=selector_id,
             part_of_id=sparql_escape_uri("http://www.example.org/id/.well-known/genid/{0}".format(uuid.uuid4())),
             uri=sparql_escape_uri(self.source_uri),
-            start=self.start,
-            end=self.end,
+            start=start_val,
+            end=end_val,
             user=sparql_escape_uri(self.agent),
             clz=sparql_escape_uri(self.class_uri),
-            extra=self.get_extra_inserts()
+            extra=self.get_extra_inserts(),
+            selector_part=selector_part,
+            selector_filter=selector_filter
         )
 
         query(query_string)
+
+    def _build_selector_parts(self):
+        """Helper method to build selector SPARQL parts conditionally.
+        
+        Returns tuple: (selector_part, selector_filter, selector_id, start_val, end_val)
+        """
+        if self.start is not None and self.end is not None:
+            selector_part = """
+                  $part_of_id a oa:SpecificResource ;
+                              oa:source $uri ;
+                              oa:selector $selector_id .
+    
+                  $selector_id a oa:TextPositionSelector ;
+                               oa:start $start ;
+                               oa:end $end ."""
+            selector_filter = """
+                    ?existingTarget a oa:SpecificResource ;
+                        oa:source $uri ;
+                        oa:selector ?existingSelector .
+    
+                    ?existingSelector a oa:TextPositionSelector ;
+                          oa:start $start ;
+                          oa:end $end ."""
+            selector_id = sparql_escape_uri("http://www.example.org/id/.well-known/genid/{0}".format(uuid.uuid4()))
+            start_val = self.start
+            end_val = self.end
+        else:
+            selector_part = """
+                  $part_of_id a oa:SpecificResource ;
+                              oa:source $uri ."""
+            selector_filter = """
+                    ?existingTarget a oa:SpecificResource ;
+                        oa:source $uri .
+                    FILTER NOT EXISTS { ?existingTarget oa:selector ?anySelector . }"""
+            selector_id = ""
+            start_val = ""
+            end_val = ""
+        return selector_part, selector_filter, selector_id, start_val, end_val
 
     def get_extra_inserts(self) -> str:
         """Return additional SPARQL triples to insert for this annotation type."""
@@ -308,7 +343,7 @@ class GeoAnnotation(NERAnnotation):
 class TripletAnnotation(NERAnnotation):
     """NER annotation representing an RDF statement (subject-predicate-object triple)."""
     
-    def __init__(self, subject: str, predicate: str, obj: str, activity_id: str, source_uri: str, start: int, end: int, agent: str, agent_type: str):
+    def __init__(self, subject: str, predicate: str, obj: str, activity_id: str, source_uri: str, start: Optional[int], end: Optional[int], agent: str, agent_type: str):
         super().__init__(activity_id, source_uri, predicate, start, end, agent, agent_type)
         self.object = obj
         self.subject = subject
@@ -326,9 +361,12 @@ class TripletAnnotation(NERAnnotation):
                   ?annotation a oa:Annotation ;
                                oa:hasTarget ?target .
                   ?target a oa:SpecificResource ;
-                          oa:source ?source; oa:selector ?selector .
-                  ?selector a oa:TextPositionSelector ;
-                          oa:start ?start; oa:end ?end .
+                          oa:source ?source .
+                  OPTIONAL {
+                      ?target oa:selector ?selector .
+                      ?selector a oa:TextPositionSelector ;
+                              oa:start ?start; oa:end ?end .
+                  }
                   ?annotation oa:hasBody ?body.
                   ?body a rdf:Statement ; rdf:subject ?subj; rdf:predicate ?pred; rdf:object ?obj .
                   OPTIONAL { ?annotation oa:motivatedBy ?motivation . }
@@ -352,8 +390,10 @@ class TripletAnnotation(NERAnnotation):
             )
         )
         for item in query_result['results']['bindings']:
+            start_val = int(item['start']['value']) if item.get('start') else None
+            end_val = int(item['end']['value']) if item.get('end') else None
             yield cls(item['subj']['value'], item['pred']['value'], item['obj']['value'], item['activity']['value'], uri,
-                      item['start']['value'], item['end']['value'], item['agent']['value'], item.get('agentType', {}).get('value'))
+                      start_val, end_val, item['agent']['value'], item.get('agentType', {}).get('value'))
 
     def add_to_triplestore(self) -> str:
         """
@@ -363,6 +403,8 @@ class TripletAnnotation(NERAnnotation):
             The URI of the created annotation
         """
         annotation_uri = "http://example.org/{0}".format(uuid.uuid4())
+        selector_part, selector_filter, selector_id, start_val, end_val = self._build_selector_parts()
+        
         query_template = Template(
             get_prefixes_for_query("ex", "oa", "mu", "prov", "foaf", "dct", "skolem", "nif", "rdf", "eli") +
             """
@@ -383,14 +425,7 @@ class TripletAnnotation(NERAnnotation):
                     rdf:subject $subject ;
                     rdf:predicate $pred ;
                     rdf:object $obj .
-                    
-                  $part_of_id a oa:SpecificResource ;
-                    oa:source $uri ;
-                    oa:selector $selector_id .
-
-                  $selector_id a oa:TextPositionSelector ;
-                    oa:start $start ;
-                    oa:end $end .
+                    $selector_part
               }
             } WHERE {
               GRAPH <""" + GRAPHS["ai"] + """> {
@@ -408,14 +443,7 @@ class TripletAnnotation(NERAnnotation):
                       rdf:subject $subject ;
                       rdf:predicate $pred ;
                       rdf:object $obj .
-                      
-                    ?existingTarget a oa:SpecificResource ;
-                        oa:source $uri ;
-                        oa:selector ?existingSelector .
-    
-                    ?existingSelector a oa:TextPositionSelector ;
-                        oa:start $start ;
-                        oa:end $end .
+                      $selector_filter
                   }
               }
             }
@@ -428,12 +456,14 @@ class TripletAnnotation(NERAnnotation):
             user=sparql_escape_uri(self.agent),
             skolem=sparql_escape_uri("http://example.org/{0}".format(uuid.uuid4())),
             subject=sparql_escape_uri(self.subject),
-            pred=self.class_uri,
-            obj=self.object,
-            selector_id=sparql_escape_uri("http://www.example.org/id/.well-known/genid/{0}".format(uuid.uuid4())),
+            pred=self.predicate,  # Already escaped or prefixed name
+            obj=self.object,  # Already escaped (string literal or URI)
+            selector_id=selector_id,
             part_of_id=sparql_escape_uri("http://www.example.org/id/.well-known/genid/{0}".format(uuid.uuid4())),
-            start=self.start,
-            end=self.end
+            start=start_val,
+            end=end_val,
+            selector_part=selector_part,
+            selector_filter=selector_filter
         )
         query(query_string)
         return annotation_uri
