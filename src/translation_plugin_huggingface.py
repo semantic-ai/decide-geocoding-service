@@ -15,14 +15,7 @@ from translatepy.language import Language
 # Helsinki-NLP model mapping: (source_lang, target_lang) -> model_name
 HELSINKI_MODELS = {
     ('nl', 'en'): 'Helsinki-NLP/opus-mt-nl-en',
-    ('nl', 'de'): 'Helsinki-NLP/opus-mt-nl-de',
-    ('nl', 'fr'): 'Helsinki-NLP/opus-mt-nl-fr',
     ('de', 'en'): 'Helsinki-NLP/opus-mt-de-en',
-    ('de', 'nl'): 'Helsinki-NLP/opus-mt-de-nl',
-    ('fr', 'en'): 'Helsinki-NLP/opus-mt-fr-en',
-    ('fr', 'nl'): 'Helsinki-NLP/opus-mt-fr-nl',
-    ('es', 'en'): 'Helsinki-NLP/opus-mt-es-en',
-    ('it', 'en'): 'Helsinki-NLP/opus-mt-it-en',
 }
 
 
