@@ -84,25 +84,30 @@ def train(
     trainer.train()
 
     # Push best model to hub and evaluate metrics
-    commit_info = trainer.push_to_hub(blocking=True)
+    commit_info = None
+    try:
+        commit_info = trainer.push_to_hub(blocking=True)
+    except Exception as exc:
+        print(f"Push to hub skipped/failed: {exc}", flush=True)
     results = trainer.evaluate()
 
     repo = git.Repo(search_parent_directories=True)
 
-    # Build SPARQL INSERT query
-    query_str = build_airo_model_insert_query(
-        hub_model_id=model_id,
-        commit_oid=commit_info.oid,
-        code_git_sha=repo.head.object.hexsha,
-        hf_repo_url=commit_info.repo_url.url,
-        hf_tree_url=f"{commit_info.repo_url.url}/tree/main/",
-        source_repo_url=repo.remote().url,
-        results=results
-    )
+    if commit_info:
+        # Build SPARQL INSERT query
+        query_str = build_airo_model_insert_query(
+            hub_model_id=model_id,
+            commit_oid=commit_info.oid,
+            code_git_sha=repo.head.object.hexsha,
+            hf_repo_url=commit_info.repo_url.url,
+            hf_tree_url=f"{commit_info.repo_url.url}/tree/main/",
+            source_repo_url=repo.remote().url,
+            results=results
+        )
 
-    # query(query_str)
+        # query(query_str)
 
-    print(query_str, flush=True)
+        print(query_str, flush=True)
 
 
 if __name__ == "__main__":
