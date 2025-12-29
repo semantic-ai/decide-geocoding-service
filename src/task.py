@@ -397,15 +397,17 @@ class TranslationTask(DecisionTask):
                     "libre": ("translatepy.translators.libre", "LibreTranslate", True),
                     "huggingface": ("translation_plugin_huggingface", "HuggingFaceTranslateService", False),
                     "etranslation": ("translation_plugin_etranslation", "ETRanslationService", False),
+                    "gemma": ("translation_plugin_gemma", "GemmaTranslateService", False),
                 }
 
                 module_name, class_name, is_external = registry.get(provider, registry.get("etranslation", registry["huggingface"])) 
                 base_package = __package__ or "src"
                 module_path = module_name if is_external else f"{base_package}.{module_name}"
 
+                self.logger.info(f"Loading translation module: {module_path}, class: {class_name}, provider: {provider}")
                 module = importlib.import_module(module_path)
                 service_cls = getattr(module, class_name)
-                service = service_cls()
+                service = service_cls()                
                 self._translator = Translator(services_list=[service])
 
             self.logger.info("Translator initialized successfully")
@@ -459,9 +461,18 @@ class TranslationTask(DecisionTask):
         if not content or not content.strip():
             raise ValueError(f"No content available for language detection: {self.source}")
         
-        detected_lang = langdetect.detect(content)
-        self.logger.info(f"Detected language from content: {detected_lang}")
-        return detected_lang
+        # Limit text length for language detection to avoid hanging on very long text
+        # langdetect can be slow/hang on very long text, so use first 1000 chars
+        text_for_detection = content[:1000] if len(content) > 1000 else content
+        self.logger.debug(f"Using {len(text_for_detection)} chars (of {len(content)}) for language detection")
+        
+        try:
+            detected_lang = langdetect.detect(text_for_detection)
+            self.logger.info(f"Detected language from content: {detected_lang}")
+            return detected_lang
+        except Exception as e:
+            self.logger.error(f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
+            return "nl"  # Default to Dutch for Belgian documents
     
     def create_target_language_relation(self, translation_annotation_uri: str, target_language: str):
         """
@@ -539,11 +550,14 @@ class TranslationTask(DecisionTask):
         if not source_language or source_language.lower() == "auto":
             self.logger.warning("Source language was 'auto' or missing, detecting from content...")
             try:
-                source_language = langdetect.detect(original_text)
+                # Limit text length for language detection to avoid hanging on very long text
+                text_for_detection = original_text[:1000] if len(original_text) > 1000 else original_text
+                self.logger.debug(f"Using {len(text_for_detection)} chars (of {len(original_text)}) for language detection")
+                source_language = langdetect.detect(text_for_detection)
                 self.logger.info(f"Detected source language: {source_language}")
             except Exception as e:
-                self.logger.error(f"Language detection failed: {e}. Defaulting to 'en'.")
-                source_language = "en"  # Fallback to English
+                self.logger.error(f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
+                source_language = "nl"  # Default to Dutch for Belgian documents
         
         # Skip translation if already in target language
         if source_language.lower() == self.target_language.lower():
