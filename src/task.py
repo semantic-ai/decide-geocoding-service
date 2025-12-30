@@ -16,6 +16,7 @@ from escape_helpers import sparql_escape_uri, sparql_escape_string
 from .helper_functions import clean_string, get_start_end_offsets, process_text, geocode_detectable
 from .ner_extractors import SpacyGeoAnalyzer
 from .ner_functions import extract_entities
+from .ner_config import DEFAULT_SETTINGS
 from .nominatim_geocoder import NominatimGeocoder
 from .annotation import GeoAnnotation, LinkingAnnotation, TripletAnnotation, NERAnnotation
 from .sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES, LANGUAGE_CODE_TO_URI, LANGUAGE_URI_TO_CODE
@@ -269,15 +270,21 @@ class EntityExtractionTask(DecisionTask):
             ).add_to_triplestore()
             self.logger.info(f"Created NER annotation for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
 
-    def extract_general_entities(self, task_data: str, language: str = 'dutch', method: str = 'regex') -> list[dict[str, Any]]:
+    def extract_general_entities(self, task_data: str, language: str = None, method: str = None) -> list[dict[str, Any]]:
         """
         Extract general NER entities (PERSON, ORG, DATE, etc.) from text.
         
         Args:
             task_data: Text to extract entities from
-            language: Language for extraction ('dutch', 'german', 'english')
-            method: Extraction method ('regex', 'spacy', 'flair', 'composite', 'title')
+            language: Language for extraction ('nl', 'de', 'en'). Defaults to DEFAULT_SETTINGS['language'].
+            method: Extraction method ('regex', 'spacy', 'flair', 'composite', 'huggingface'). Defaults to DEFAULT_SETTINGS['method'].
         """
+        # Use defaults from config if not provided
+        if language is None:
+            language = DEFAULT_SETTINGS['language']
+        if method is None:
+            method = DEFAULT_SETTINGS['method']
+        
         self.logger.info(f"Extracting general entities using {method}/{language}")
         
         # Extract entities using the factory pattern
@@ -307,7 +314,7 @@ class EntityExtractionTask(DecisionTask):
         title_entities = extract_entities(eli_expression, language=language, method='title')
         self.create_title_relation(self.source, title_entities)
         
-        # Extract general entities (DATE, etc.) - uses regex by default
+        # Extract general entities (DATE, etc.) - uses DEFAULT_SETTINGS['method'] from ner_config
         general_entities = self.extract_general_entities(eli_expression, language=language)
         self.create_general_entity_annotations(self.source, general_entities)
 

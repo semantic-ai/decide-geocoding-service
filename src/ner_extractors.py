@@ -126,6 +126,11 @@ class SpacyExtractor(BaseExtractor):
         """Extract entities using spaCy NER."""
         try:
             nlp = model_manager.get_spacy_model(self.language)
+            
+            if nlp is None:
+                logging.warning(f"spaCy model not available for language '{self.language}'")
+                return []
+            
             doc = nlp(text)
             
             entities = []
@@ -140,7 +145,37 @@ class SpacyExtractor(BaseExtractor):
             return self._deduplicate_entities(entities)
             
         except Exception as e:
-            print(f"Error in spaCy extraction ({self.language}): {e}")
+            logging.warning(f"Error in spaCy extraction ({self.language}): {e}")
+            return []
+
+
+class HuggingFaceExtractor(BaseExtractor):
+    """Extract entities using Hugging Face transformers pipeline."""
+    
+    def extract(self, text: str) -> List[Dict[str, Any]]:
+        """Extract entities using Hugging Face NER pipeline."""
+        try:
+            ner_pipeline = model_manager.get_huggingface_model(self.language)
+            
+            if ner_pipeline is None:
+                logging.warning(f"HuggingFace model not available for language '{self.language}'")
+                return []
+            
+            results = ner_pipeline(text)
+            
+            entities = []
+            for result in results:
+                entities.append({
+                    'text': result['word'],
+                    'label': result['entity_group'],
+                    'start': result['start'],
+                    'end': result['end']
+                })
+            
+            return self._deduplicate_entities(entities)
+            
+        except Exception as e:
+            logging.warning(f"Error in HuggingFace extraction ({self.language}): {e}")
             return []
 
 
@@ -149,22 +184,17 @@ class FlairExtractor(BaseExtractor):
     
     def __init__(self, language: str = 'de', model_name: str = None):
         super().__init__(language)
-        self.model_name = model_name or self._get_default_model()
-    
-    def _get_default_model(self) -> str:
-        """Get default Flair model based on language."""
-        model_mapping = {
-            'de': 'flair/ner-german-legal',
-            'en': 'flair/ner-english',
-            'nl': 'flair/ner-dutch'
-        }
-        return model_mapping.get(self.language, 'flair/ner-english')
+        self.model_name = model_name  # Optional override, otherwise uses language from config
     
     def extract(self, text: str) -> List[Dict[str, Any]]:
         """Extract entities using Flair NER."""
         try:
-            # Load the Flair SequenceTagger model
-            tagger = model_manager.get_flair_model(self.model_name)
+            # Load the Flair SequenceTagger model using language from config or explicit model_name
+            tagger = model_manager.get_flair_model(language=self.language, model_name=self.model_name)
+            
+            if tagger is None:
+                logging.warning(f"Flair model not available for language '{self.language}'")
+                return []
             
             # Create sentence (don't use tokenizer for legal texts as recommended)
             sentence = Sentence(text, use_tokenizer=False)
@@ -185,7 +215,8 @@ class FlairExtractor(BaseExtractor):
             return self._deduplicate_entities(entities)
             
         except Exception as e:
-            print(f"Error in Flair extraction ({self.model_name}): {e}")
+            model_info = self.model_name or f"config({self.language})"
+            logging.warning(f"Error in Flair extraction ({model_info}): {e}")
             return []
 
 
@@ -340,25 +371,25 @@ class CompositeExtractor(BaseExtractor):
 
 
 # Pre-configured extractors for common use cases
-def create_german_extractor() -> CompositeExtractor:
+def create_german_composite_extractor() -> CompositeExtractor:
     """Create a comprehensive German NER extractor using Flair's legal model."""
     return CompositeExtractor([
-        FlairExtractor('de', 'flair/ner-german-legal'),
+        FlairExtractor('de'),  # Uses config: NER_MODELS['flair']['de']
         LanguageRegexExtractor('de')
     ])
 
 
-def create_dutch_extractor() -> CompositeExtractor:
+def create_dutch_composite_extractor() -> CompositeExtractor:
     """Create a comprehensive Dutch NER extractor."""
     return CompositeExtractor([
-        SpacyExtractor('nl'),
+        HuggingFaceExtractor('nl'),
         LanguageRegexExtractor('nl')
     ])
 
 
-def create_english_extractor() -> CompositeExtractor:
+def create_english_composite_extractor() -> CompositeExtractor:
     """Create a comprehensive English NER extractor."""
     return CompositeExtractor([
-        SpacyExtractor('en'),
+        HuggingFaceExtractor('en'),
         LanguageRegexExtractor('en')  # Will be empty unless patterns are added
     ])
