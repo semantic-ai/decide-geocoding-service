@@ -71,21 +71,38 @@ class HuggingFaceTranslateService(BaseTranslator):
             return language.alpha2 if hasattr(language, 'alpha2') else str(language)
         return str(language)
     
-    def _split_text_at_word_boundaries(self, text: str, tokenizer: MarianTokenizer, max_tokens: int = 512) -> list:
+    def _split_text_at_word_boundaries(self, text: str, tokenizer: MarianTokenizer, max_tokens: int = 256) -> list:
         """
         Split text into chunks at word boundaries, respecting token limits.
         Ensures chunks don't exceed max_tokens and splits only at whitespace.
         First tries sentence boundaries, then falls back to word boundaries.
         Aligned with eTranslation chunking logic for consistency.
         """
-        # First, try to split at sentence boundaries (periods, exclamation, question marks)
-        parts = re.split(r'(?<=[.!?])\s+', text)
+        # Split on: sentence boundaries, bullets, newlines, and punctuation without space
+        parts = re.split(r'(?<=[.!?])\s+|(?<=[.!?])(?=[A-ZÀ-ÖØ-Ý])|\n+|•\s*|;\s*', text)
+        parts = [p.strip() for p in parts if p.strip()]
         chunks = []
         cur = ""
         
         for p in parts:
             if not cur:
-                cur = p
+                # Validate first chunk - don't accept oversized parts blindly
+                if len(tokenizer.encode(p, add_special_tokens=False)) <= max_tokens:
+                    cur = p
+                else:
+                    # First part is too large, split by words
+                    words = p.split()
+                    for w in words:
+                        if not cur:
+                            cur = w
+                        else:
+                            test_text = cur + " " + w
+                            if len(tokenizer.encode(test_text, add_special_tokens=False)) <= max_tokens:
+                                cur = test_text
+                            else:
+                                if cur:
+                                    chunks.append(cur)
+                                cur = w
             else:
                 # Check if adding this part would exceed token limit
                 test_text = cur + " " + p
@@ -94,6 +111,11 @@ class HuggingFaceTranslateService(BaseTranslator):
                 if token_count <= max_tokens:
                     cur = test_text
                 else:
+                    # Save current chunk before processing next part
+                    if cur:
+                        chunks.append(cur)
+                    cur = ""
+                    
                     # Check if the part itself exceeds limit (handle immediately like eTranslation)
                     part_token_count = len(tokenizer.encode(p, add_special_tokens=False))
                     if part_token_count > max_tokens:
@@ -119,27 +141,35 @@ class HuggingFaceTranslateService(BaseTranslator):
                                 if token_count <= max_tokens:
                                     cur = test_text
                                 else:
-                                    chunks.append(cur)
+                                    if cur:
+                                        chunks.append(cur)
                                     cur = w
                     else:
                         # Part fits alone, save current chunk and start new one
-                        chunks.append(cur)
+                        if cur:
+                            chunks.append(cur)
                         cur = p
         
-        if cur:
-            chunks.append(cur)
+        if cur and cur.strip():
+            chunks.append(cur.strip())
         
-        return chunks if chunks else [text]  # Ensure at least one chunk
+        # Filter out any empty chunks that might have been created
+        chunks = [c for c in chunks if c.strip()]
+        
+        return chunks if chunks else [text]
     
     def _translate_chunked(self, text: str, tokenizer: MarianTokenizer, model: MarianMTModel, 
                           src_lang: str, tgt_lang: str) -> str:
         """Translate long text by chunking and combining results."""
-        chunks = self._split_text_at_word_boundaries(text, tokenizer, max_tokens=512)
+        chunks = self._split_text_at_word_boundaries(text, tokenizer, max_tokens=256)
+        
+        # Filter empty chunks to prevent model from generating garbage
+        chunks = [c for c in chunks if c.strip()]
         
         if len(chunks) == 1:
             # Single chunk, translate directly
             encoded = tokenizer(chunks[0], return_tensors="pt", padding=True, truncation=True, max_length=512)
-            translated = model.generate(**encoded, max_length=512)
+            translated = model.generate(**encoded, max_new_tokens=1024)
             return tokenizer.decode(translated[0], skip_special_tokens=True)
         
         self.logger.info(f"Chunking text into {len(chunks)} chunks for translation")
@@ -148,14 +178,15 @@ class HuggingFaceTranslateService(BaseTranslator):
         for i, chunk in enumerate(chunks, 1):
             self.logger.debug(f"Translating chunk {i}/{len(chunks)} ({len(chunk)} chars)")
             encoded = tokenizer(chunk, return_tensors="pt", padding=True, truncation=True, max_length=512)
-            translated = model.generate(**encoded, max_length=512)
+            translated = model.generate(**encoded, max_new_tokens=1024)
             translated_text = tokenizer.decode(translated[0], skip_special_tokens=True)
             translated_chunks.append(translated_text)
         
-        # Combine chunks with single space, then normalize whitespace
-        combined = " ".join(translated_chunks)
-        # Normalize multiple spaces to single space
-        combined = re.sub(r'\s+', ' ', combined).strip()
+        # Combine chunks - preserve structure with newlines, normalize excessive whitespace
+        combined = "\n".join(translated_chunks)
+        combined = re.sub(r'\n{3,}', '\n\n', combined)
+        combined = re.sub(r'[ \t]+', ' ', combined)
+        combined = combined.strip()
         
         return combined
     
@@ -170,13 +201,13 @@ class HuggingFaceTranslateService(BaseTranslator):
         # Check token count to determine if chunking is needed
         token_count = len(tokenizer.encode(text, add_special_tokens=False))
         
-        if token_count > 512:
+        if token_count > 256:
             self.logger.info(f"Text exceeds token limit ({token_count} > 512), using chunking")
             translation = self._translate_chunked(text, tokenizer, model, src_lang, tgt_lang)
         else:
             # Single chunk translation
             encoded = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
-            translated = model.generate(**encoded, max_length=512)
+            translated = model.generate(**encoded, max_new_tokens=1024)
             translation = tokenizer.decode(translated[0], skip_special_tokens=True)
         
         self.logger.info(f"Translation completed: {len(translation)} characters")
