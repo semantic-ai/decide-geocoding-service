@@ -37,7 +37,6 @@ class Task(ABC):
     def lookup(cls, task_type: str) -> Optional['Task']:
         """
         Yield all subclasses of the given class, per:
-        https://adamj.eu/tech/2024/05/10/python-all-subclasses/
         """
         for subclass in cls.__subclasses__():
             if hasattr(subclass, '__task_type__') and subclass.__task_type__ == task_type:
@@ -187,7 +186,6 @@ class GeoExtractionTask(DecisionTask):
         if hasattr(doc, 'error'):
             self.logger.error(f"Error: {doc['error']}")
         else:
-            # Geocoding Results
             if detectables:
                 self.logger.info("Geocoding Results")
 
@@ -266,9 +264,11 @@ class EntityExtractionTask(DecisionTask):
                 start=entity['start'],
                 end=entity['end'],
                 agent=AI_COMPONENTS["ner_extractor"],
-                agent_type=AGENT_TYPES["ai_component"]
+                agent_type=AGENT_TYPES["ai_component"],
+                confidence=entity.get('confidence', 1.0)
             ).add_to_triplestore()
-            self.logger.info(f"Created NER annotation for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
+            confidence_str = f" (confidence: {entity.get('confidence', 1.0):.2f})" if 'confidence' in entity else ""
+            self.logger.info(f"Created NER annotation for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]{confidence_str}")
 
     def extract_general_entities(self, task_data: str, language: str = None, method: str = None) -> list[dict[str, Any]]:
         """
@@ -279,7 +279,6 @@ class EntityExtractionTask(DecisionTask):
             language: Language for extraction ('nl', 'de', 'en'). Defaults to DEFAULT_SETTINGS['language'].
             method: Extraction method ('regex', 'spacy', 'flair', 'composite', 'huggingface'). Defaults to DEFAULT_SETTINGS['method'].
         """
-        # Use defaults from config if not provided
         if language is None:
             language = DEFAULT_SETTINGS['language']
         if method is None:

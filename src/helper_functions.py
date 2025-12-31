@@ -315,7 +315,7 @@ def get_start_end_offsets(text: str, word: str) -> list:
         i = text.find(word, start)
         if i == -1:
             break
-        offsets.append((i, i + len(word) - 1))
+        offsets.append((i, i + len(word)))
         start = i + len(word)
 
     return offsets

@@ -70,9 +70,25 @@ TITLE_EXTRACTION_INSTRUCTION = """
     The title should be the main heading or subject of the document.
 """
 
-# Default extraction settings (can be overridden via environment variables)
+LABEL_MAPPINGS = {
+    'spacy': {
+        'PER': 'PERSON',
+        'ORG': 'ORGANIZATION',
+        'LOC': 'LOCATION',
+        'GPE': 'LOCATION', 
+        'MISC': 'MISCELLANEOUS',
+    },
+    'flair': {
+        'PER': 'PERSON',
+        'ORG': 'ORGANIZATION',
+        'LOC': 'LOCATION',
+    },
+    'huggingface': {}, 
+    'regex': {},
+}
+
 DEFAULT_SETTINGS = {
     'language': os.getenv('NER_DEFAULT_LANGUAGE', 'nl'),
-    'method': os.getenv('NER_DEFAULT_METHOD', 'huggingface'),
-    'deduplicate': os.getenv('NER_DEDUPLICATE', 'true').lower() == 'true',
+    'method': os.getenv('NER_DEFAULT_METHOD', 'composite'),
+    'post_process': os.getenv('NER_POST_PROCESS', 'true').lower() == 'true',
 }

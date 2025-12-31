@@ -159,11 +159,12 @@ class LinkingAnnotation(Annotation):
 class NERAnnotation(Annotation):
     """Named Entity Recognition annotation with text position selectors."""
     
-    def __init__(self, activity_id: str, source_uri: str, class_uri: str, start: Optional[int], end: Optional[int], agent: str, agent_type: str):
+    def __init__(self, activity_id: str, source_uri: str, class_uri: str, start: Optional[int], end: Optional[int], agent: str, agent_type: str, confidence: float = 1.0):
         super().__init__(activity_id, source_uri, agent, agent_type)
         self.class_uri = class_uri
         self.start = start
         self.end = end
+        self.confidence = confidence
 
     @classmethod
     def create_from_uri(cls, uri: str) -> Iterator['NERAnnotation']:
@@ -236,7 +237,7 @@ class NERAnnotation(Annotation):
                   $annotation_id a oa:Annotation ;
                                  mu:uuid "$id";
                                  oa:hasBody $clz ;
-                                 nif:confidence 1 ;
+                                 nif:confidence $confidence ;
                                  oa:motivatedBy oa:tagging ;
                                  oa:hasTarget $part_of_id .
     
@@ -268,6 +269,7 @@ class NERAnnotation(Annotation):
             part_of_id=part_of_id,
             user=sparql_escape_uri(self.agent),
             clz=sparql_escape_uri(self.class_uri),
+            confidence=sparql_escape_float(self.confidence),
             extra=self.get_extra_inserts(),
             selector_part=selector_part,
             selector_filter=selector_filter
