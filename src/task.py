@@ -1,14 +1,16 @@
 import contextlib
 import logging
 import os
+import importlib
 import json
 import langdetect
 from abc import ABC, abstractmethod
 from typing import Optional, Any
 
 from uuid import uuid4
-from string import Template
 from helpers import query
+from string import Template
+from translatepy import Translator
 from escape_helpers import sparql_escape_uri, sparql_escape_string
 
 from .helper_functions import clean_string, get_start_end_offsets, process_text, geocode_detectable
@@ -16,9 +18,10 @@ from .ner_extractors import SpacyGeoAnalyzer
 from .ner_functions import extract_entities
 from .nominatim_geocoder import NominatimGeocoder
 from .annotation import GeoAnnotation, LinkingAnnotation, TripletAnnotation
-from .sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES
+from .sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES, LANGUAGE_CODE_TO_URI, LANGUAGE_URI_TO_CODE
 from .llm_models.llm_model_clients import OpenAIModel
 from .llm_models.llm_task_models import LlmTaskInput, EntityLinkingTaskOutput
+
 
 
 class Task(ABC):
@@ -153,11 +156,16 @@ class DecisionTask(Task, ABC):
 
         query_result = query(query_string)
 
-        title = query_result["results"]["bindings"][0]["title"]["value"]
-        description = query_result["results"]["bindings"][0]["description"]["value"]
-        decision_basis = query_result["results"]["bindings"][0]["decision_basis"]["value"]
+        # Handle optional fields - they may not exist in the result
+        binding = query_result["results"]["bindings"][0] if query_result["results"]["bindings"] else {}
+        
+        title = binding.get("title", {}).get("value", "") if binding.get("title") else ""
+        description = binding.get("description", {}).get("value", "") if binding.get("description") else ""
+        decision_basis = binding.get("decision_basis", {}).get("value", "") if binding.get("decision_basis") else ""
 
-        return "\n".join([title, description, decision_basis])
+        # Join non-empty parts
+        parts = [part for part in [title, description, decision_basis] if part]
+        return "\n".join(parts) if parts else ""
 
 
 class GeoExtractionTask(DecisionTask):
@@ -219,15 +227,10 @@ class EntityExtractionTask(DecisionTask):
     __task_type__ = TASK_OPERATIONS["entity_extraction"]
 
     def create_language_relation(self, source_uri: str, language: str):
-        language_mapping = {
-            'nl': "http://publications.europa.eu/resource/authority/language/NLD",
-            'de': "http://publications.europa.eu/resource/authority/language/DEU",
-            'en': "http://publications.europa.eu/resource/authority/language/ENG"
-        }
         TripletAnnotation(
             subject=self.source,
             predicate="eli:language",
-            obj=sparql_escape_uri(language_mapping.get(language)),
+            obj=sparql_escape_uri(LANGUAGE_CODE_TO_URI.get(language)),
             activity_id=self.task_uri,
             source_uri=source_uri,
             start=0,
@@ -252,10 +255,6 @@ class EntityExtractionTask(DecisionTask):
                 ).add_to_triplestore()
                 self.logger.info(f"Created Title triplet suggestion for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
 
-    def create_en_translation(self, task_data: str) -> str:
-        # todo fallback to source to be removed
-        return self.source
-
     def extract_general_entities(self, task_data: str, language: str = 'dutch', method: str = 'regex') -> list[dict[str, Any]]:
         """
         Extract general NER entities (PERSON, ORG, DATE, etc.) from text.
@@ -277,19 +276,27 @@ class EntityExtractionTask(DecisionTask):
         eli_expression = self.fetch_data()
         self.logger.info(eli_expression)
 
-        language = langdetect.detect(eli_expression)
-        # todo replace first argument with eli:expression uri
+        # whitespace-only content can crash langdetect
+        if not eli_expression or not eli_expression.strip():
+            self.logger.warning("No content available for language detection; skipping language annotation")
+            return
+
+        try:
+            language = langdetect.detect(eli_expression)
+        except Exception as e:
+            self.logger.warning(f"Language detection failed ({e}); defaulting to 'en'")
+            language = "en"
+
         self.create_language_relation(self.source, language)
 
         # Uses defaults from ner_config.py: language='dutch', method='regex'
         # Language can be passed in future when extracted from database
-        uri_of_translation_expr = self.create_en_translation(eli_expression)
         #entities = self.extract_general_entities(eli_expression, language)
 
         # todo to be improved upon a lot by inserting functions to create the other predicates
         # ELI properties
         entities = extract_entities(eli_expression, language=language, method='title')
-        self.create_title_relation(uri_of_translation_expr, entities)
+        self.create_title_relation(self.source, entities)
 
 
 class ModelAnnotatingTask(DecisionTask):
@@ -361,3 +368,226 @@ class ModelAnnotatingTask(DecisionTask):
             AGENT_TYPES["ai_component"]
         )
         annotation.add_to_triplestore()
+
+
+class TranslationTask(DecisionTask):
+    """Task that translates text to a target language using a configurable translation provider."""
+    
+    __task_type__ = TASK_OPERATIONS["translation"]
+    
+    def __init__(self, task_uri: str):
+        super().__init__(task_uri)
+        
+        self.target_language = os.getenv("TRANSLATION_TARGET_LANG", "en")
+        self._translator = None
+    
+    def get_translator(self):
+        """Lazy load translator based on TRANSLATION_PROVIDER env var."""
+        if self._translator is None:
+            provider = os.getenv("TRANSLATION_PROVIDER", "huggingface").lower()
+            self.logger.info(f"Initializing translator provider: {provider}")
+
+            if provider == "auto":
+                self._translator = Translator()
+            else:
+                registry = {
+                    "google": ("translatepy.translators.google", "GoogleTranslate", True),
+                    "microsoft": ("translatepy.translators.microsoft", "MicrosoftTranslate", True),
+                    "deepl": ("translatepy.translators.deepl", "DeeplTranslate", True),
+                    "libre": ("translatepy.translators.libre", "LibreTranslate", True),
+                    "huggingface": ("translation_plugin_huggingface", "HuggingFaceTranslateService", False),
+                    "etranslation": ("translation_plugin_etranslation", "ETRanslationService", False),
+                    "gemma": ("translation_plugin_gemma", "GemmaTranslateService", False),
+                }
+
+                module_name, class_name, is_external = registry.get(provider, registry.get("etranslation", registry["huggingface"])) 
+                base_package = __package__ or "src"
+                module_path = module_name if is_external else f"{base_package}.{module_name}"
+
+                self.logger.info(f"Loading translation module: {module_path}, class: {class_name}, provider: {provider}")
+                module = importlib.import_module(module_path)
+                service_cls = getattr(module, class_name)
+                service = service_cls()                
+                self._translator = Translator(services_list=[service])
+
+            self.logger.info("Translator initialized successfully")
+            
+        return self._translator
+    
+    def retrieve_source_language(self, content: Optional[str] = None) -> str:
+        """
+        Retrieve the source language from the triplestore.
+        The language should have been stored by EntityExtractionTask via TripletAnnotation.
+        If not found, detect it from the content.
+        
+        Args:
+            content: Optional content string to use for language detection fallback.
+                    If not provided and detection is needed, will fetch data.
+        
+        Returns:
+            Language code (e.g., 'nl', 'de', 'en')
+        """
+        query_string = Template(
+            get_prefixes_for_query("eli", "rdf", "oa") +
+            """
+            SELECT ?language WHERE {
+                GRAPH <""" + GRAPHS["ai"] + """> {
+                    ?ann oa:hasBody ?stmt .
+                    ?stmt a rdf:Statement ;
+                           rdf:subject <$source> ;
+                           rdf:predicate eli:language ;
+                           rdf:object ?language .
+                }
+            }
+            LIMIT 1
+            """).substitute(source=self.source)
+        
+        result = query(query_string)
+        bindings = result.get("results", {}).get("bindings", [])
+        language_uri = bindings[0]["language"]["value"] if bindings else None
+        
+        if language_uri:
+            lang_code = LANGUAGE_URI_TO_CODE.get(language_uri)
+            if lang_code:
+                self.logger.info(f"Retrieved source language from database: {lang_code}")
+                return lang_code
+            self.logger.warning(f"Unknown language URI: {language_uri}")
+        
+        # Fallback: detect language from content
+        self.logger.warning("No language found in database, detecting from content...")
+        if not content:
+            content = self.fetch_data()
+        
+        if not content or not content.strip():
+            raise ValueError(f"No content available for language detection: {self.source}")
+        
+        # Limit text length for language detection to avoid hanging on very long text
+        # langdetect can be slow/hang on very long text, so use first 1000 chars
+        text_for_detection = content[:1000] if len(content) > 1000 else content
+        self.logger.debug(f"Using {len(text_for_detection)} chars (of {len(content)}) for language detection")
+        
+        try:
+            detected_lang = langdetect.detect(text_for_detection)
+            self.logger.info(f"Detected language from content: {detected_lang}")
+            return detected_lang
+        except Exception as e:
+            self.logger.error(f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
+            return "nl"  # Default to Dutch for Belgian documents
+    
+    def create_target_language_relation(self, translation_annotation_uri: str, target_language: str):
+        """
+        Store the target language as an annotation of the translation annotation itself.
+        Uses eli:language predicate (same as EntityExtractionTask uses for source language).
+        
+        Args:
+            translation_annotation_uri: URI of the translation annotation to annotate
+            target_language: Target language code (must exist in LANGUAGE_CODE_TO_URI)
+        """
+        TripletAnnotation(
+            subject=translation_annotation_uri,
+            predicate="eli:language",
+            obj=sparql_escape_uri(LANGUAGE_CODE_TO_URI[target_language]),
+            activity_id=self.task_uri,
+            source_uri=translation_annotation_uri,
+            start=0,
+            end=0,
+            agent=AI_COMPONENTS["translator"],
+            agent_type=AGENT_TYPES["ai_component"]
+        ).add_to_triplestore()
+        self.logger.info(f"Stored target language annotation on translation annotation: {target_language}")
+    
+    def create_translation_relation(self, source_uri: str, translated_text: str, target_language: str):
+        """
+        Store the translated text as an annotation of the original expression.
+        Then create a language annotation that targets the translation annotation itself.
+        
+        Args:
+            source_uri: URI of the source expression being annotated
+            translated_text: The translated content (stored as string literal, like title)
+            target_language: Target language code
+        """
+        # Store translation text directly as annotation (same pattern as title)
+        # The text is stored as a string literal in rdf:object, just like title does
+        translation_annotation_uri = TripletAnnotation(
+            subject=self.source,
+            predicate="ex:hasTranslation",
+            obj=sparql_escape_string(translated_text),
+            activity_id=self.task_uri,
+            source_uri=source_uri,
+            start=0,
+            end=0,
+            agent=AI_COMPONENTS["translator"],
+            agent_type=AGENT_TYPES["ai_component"]
+        ).add_to_triplestore()
+        
+        # Normalize language code (lowercase) and verify it exists in our mapping
+        normalized_lang = target_language.lower()
+        if normalized_lang in LANGUAGE_CODE_TO_URI:
+            # Create language annotation that targets the translation annotation itself
+            self.create_target_language_relation(translation_annotation_uri, normalized_lang)
+        else:
+            self.logger.warning(f"Language code '{target_language}' not found in LANGUAGE_CODE_TO_URI mapping, skipping language annotation")
+        
+        self.logger.info(f"Stored translation text as annotation (language: {target_language})")
+    
+    def process(self):
+        """
+        Main processing logic: fetch text, translate it, store in triplestore.
+        """
+        # Fetch the original text
+        original_text = self.fetch_data()
+        self.logger.info(f"Processing translation for source: {self.source}")
+
+        # If there's no content, skip early
+        if not original_text or not original_text.strip():
+            self.logger.warning("No content found for source; skipping translation")
+            return
+        
+        # Retrieve source language from database (set by NER task)
+        source_language = self.retrieve_source_language(content=original_text)
+        
+        # Ensure we have an explicit source language
+        if not source_language or source_language.lower() == "auto":
+            self.logger.warning("Source language was 'auto' or missing, detecting from content...")
+            try:
+                # Limit text length for language detection to avoid hanging on very long text
+                text_for_detection = original_text[:1000] if len(original_text) > 1000 else original_text
+                self.logger.debug(f"Using {len(text_for_detection)} chars (of {len(original_text)}) for language detection")
+                source_language = langdetect.detect(text_for_detection)
+                self.logger.info(f"Detected source language: {source_language}")
+            except Exception as e:
+                self.logger.error(f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
+                source_language = "nl"  # Default to Dutch for Belgian documents
+        
+        # Skip translation if already in target language
+        if source_language.lower() == self.target_language.lower():
+            self.logger.info(f"Text is already in target language ({self.target_language}), skipping translation")
+            return
+        
+        # Get translator and translate
+        translator = self.get_translator()
+        
+        self.logger.info(f"Translating from {source_language} to {self.target_language}")
+        
+        # Use translatepy's translate method
+        translation_result = translator.translate(
+            original_text,
+            destination_language=self.target_language,
+            source_language=source_language
+        )
+        
+        # Extract the translated text from the result
+        translated_text = translation_result.result
+        service_used = translation_result.service
+        self.logger.info(f"Translation service used: {service_used}")
+        
+        self.logger.info(f"Translation completed.")
+        
+        # Store the translation as annotation (same pattern as title/language - text stored as string literal)
+        self.create_translation_relation(
+            self.source,
+            translated_text,
+            self.target_language
+        )
+        
+        self.logger.info(f"Translation stored as annotation")

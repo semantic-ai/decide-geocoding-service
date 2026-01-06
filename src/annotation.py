@@ -355,7 +355,14 @@ class TripletAnnotation(NERAnnotation):
             yield cls(item['subj']['value'], item['pred']['value'], item['obj']['value'], item['activity']['value'], uri,
                       item['start']['value'], item['end']['value'], item['agent']['value'], item.get('agentType', {}).get('value'))
 
-    def add_to_triplestore(self):
+    def add_to_triplestore(self) -> str:
+        """
+        Insert this annotation into the triplestore.
+        
+        Returns:
+            The URI of the created annotation
+        """
+        annotation_uri = "http://example.org/{0}".format(uuid.uuid4())
         query_template = Template(
             get_prefixes_for_query("ex", "oa", "mu", "prov", "foaf", "dct", "skolem", "nif", "rdf", "eli") +
             """
@@ -415,7 +422,7 @@ class TripletAnnotation(NERAnnotation):
             """)
         query_string = query_template.substitute(
             id=str(uuid.uuid1()),
-            annotation_id=sparql_escape_uri("http://example.org/{0}".format(uuid.uuid4())),
+            annotation_id=sparql_escape_uri(annotation_uri),
             activity_id=sparql_escape_uri(self.activity_id),
             uri=sparql_escape_uri(self.source_uri),
             user=sparql_escape_uri(self.agent),
@@ -429,3 +436,4 @@ class TripletAnnotation(NERAnnotation):
             end=self.end
         )
         query(query_string)
+        return annotation_uri

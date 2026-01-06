@@ -10,5 +10,6 @@ flair
 transformers
 peft
 langdetect
+translatepy
 #tokenizers==0.22.1
 #scikit-learn

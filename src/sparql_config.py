@@ -75,6 +75,7 @@ TASK_OPERATIONS = {
     "entity_extraction": "http://lblod.data.gift/id/jobs/concept/TaskOperation/entity-extracting",
     "model_annotation": "http://lblod.data.gift/id/jobs/concept/TaskOperation/model-annotating",
     "geo_extraction": "http://lblod.data.gift/id/jobs/concept/TaskOperation/geo-extracting",
+    "translation": "http://lblod.data.gift/id/jobs/concept/TaskOperation/translating",
 }
 
 # ==============================================================================
@@ -94,6 +95,27 @@ AI_COMPONENTS = {
     "ner_extractor": "http://example.org/entity-extraction",
     "entity_linker": "http://example.org/entity-linking",
     "decide_system": "http://example.org/DECIDe",
+    "translator": "http://example.org/translation",
+}
+
+# ==============================================================================
+# LANGUAGE MAPPINGS
+# ==============================================================================
+
+LANGUAGE_CODE_TO_URI = {
+    'nl': "http://publications.europa.eu/resource/authority/language/NLD",
+    'de': "http://publications.europa.eu/resource/authority/language/DEU",
+    'en': "http://publications.europa.eu/resource/authority/language/ENG",
+    'fr': "http://publications.europa.eu/resource/authority/language/FRA",
+    'es': "http://publications.europa.eu/resource/authority/language/SPA"
+}
+
+LANGUAGE_URI_TO_CODE = {
+    "http://publications.europa.eu/resource/authority/language/NLD": "nl",
+    "http://publications.europa.eu/resource/authority/language/DEU": "de",
+    "http://publications.europa.eu/resource/authority/language/ENG": "en",
+    "http://publications.europa.eu/resource/authority/language/FRA": "fr",
+    "http://publications.europa.eu/resource/authority/language/SPA": "es"
 }
 
 # ==============================================================================
