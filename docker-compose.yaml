@@ -29,6 +29,8 @@ services:
       OPENAI_API_KEY: 'sk-SECRET-PART'
       LLM_MODEL_NAME: 'gpt-4o-mini'
       LLM_TEMPERATURE: 0.1
+      HUGGINGFACE_OUTPUT_MODEL_ID: "model_name"
+      HUGGINGFACE_TOKEN: ""
     volumes:
       - ./:/app
 

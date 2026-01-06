@@ -40,13 +40,18 @@ class LabeledData(ABC):
 class SingleLabelData(LabeledData):
     def format(self) -> Dataset:
         """Format the data into a Hugging Face Dataset for single-label classification."""
-        return Dataset.from_list([
+        ds = Dataset.from_list([
             {
                 "text": decision["text"],
                 "label": self.label2id[decision["classes"][0]]
             }
             for decision in self.data
-        ]).class_encode_column("label").train_test_split(test_size=0.1, stratify_by_column="label")
+        ]).class_encode_column("label")
+        try:
+            return ds.train_test_split(test_size=0.1, stratify_by_column="label")
+        except ValueError:
+            # Fallback when classes are too small to stratify
+            return ds.train_test_split(test_size=0.1, shuffle=True)
 
 
 class MultiLabelData(LabeledData):

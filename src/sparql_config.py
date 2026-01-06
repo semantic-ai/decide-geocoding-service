@@ -34,6 +34,8 @@ SPARQL_PREFIXES = {
     "task": "http://lblod.data.gift/vocabularies/tasks/",
     "nfo": "http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#",
     "eli": "http://data.europa.eu/eli/ontology#",
+    "eli-dl": "http://data.europa.eu/eli/eli-dl#",
+    "epvoc": "https://data.europarl.europa.eu/def/epvoc#",
     "ns1": "http://www.w3.org/ns/dqv#",
     "ns2": "https://w3id.org/okn/o/sd#",
     "ns3": "https://w3id.org/airo#",
@@ -48,6 +50,8 @@ SPARQL_PREFIXES = {
 GRAPHS = {
     "ai": "http://mu.semte.ch/graphs/ai",
     "jobs": "http://mu.semte.ch/graphs/jobs",
+    "oparl_temp": "http://mu.semte.ch/graphs/oparl-temp",
+    "oslo_temp": "http://mu.semte.ch/graphs/oslo-temp",
 }
 
 # ==============================================================================
