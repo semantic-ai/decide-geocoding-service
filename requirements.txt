@@ -17,4 +17,6 @@ rdflib
 gitpython
 fastapi
 SPARQLWrapper
-
+translatepy
+#tokenizers==0.22.1
+#scikit-learn
