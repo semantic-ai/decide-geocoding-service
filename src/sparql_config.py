@@ -32,8 +32,14 @@ SPARQL_PREFIXES = {
     "skos": "http://www.w3.org/2004/02/skos/core#",
     "adms": "http://www.w3.org/ns/adms#",
     "task": "http://lblod.data.gift/vocabularies/tasks/",
+    "nfo": "http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#",
     "eli": "http://data.europa.eu/eli/ontology#",
-    "nfo": "http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#"
+    "eli-dl": "http://data.europa.eu/eli/eli-dl#",
+    "epvoc": "https://data.europarl.europa.eu/def/epvoc#",
+    "ns1": "http://www.w3.org/ns/dqv#",
+    "ns2": "https://w3id.org/okn/o/sd#",
+    "ns3": "https://w3id.org/airo#",
+    "schema": "https://schema.org/",
 }
 
 # ==============================================================================
@@ -44,6 +50,8 @@ SPARQL_PREFIXES = {
 GRAPHS = {
     "ai": "http://mu.semte.ch/graphs/ai",
     "jobs": "http://mu.semte.ch/graphs/jobs",
+    "oparl_temp": "http://mu.semte.ch/graphs/oparl-temp",
+    "oslo_temp": "http://mu.semte.ch/graphs/oslo-temp",
 }
 
 # ==============================================================================
@@ -74,6 +82,8 @@ JOB_STATUSES = {
 TASK_OPERATIONS = {
     "entity_extraction": "http://lblod.data.gift/id/jobs/concept/TaskOperation/entity-extracting",
     "model_annotation": "http://lblod.data.gift/id/jobs/concept/TaskOperation/model-annotating",
+    "model_batch_annotation": "http://lblod.data.gift/id/jobs/concept/TaskOperation/model-batch-annotating",
+    "classifier_training": "http://lblod.data.gift/id/jobs/concept/TaskOperation/classifier-training",
     "geo_extraction": "http://lblod.data.gift/id/jobs/concept/TaskOperation/geo-extracting",
     "translation": "http://lblod.data.gift/id/jobs/concept/TaskOperation/translating",
 }
@@ -93,7 +103,7 @@ AGENT_TYPES = {
 
 AI_COMPONENTS = {
     "ner_extractor": "http://example.org/entity-extraction",
-    "entity_linker": "http://example.org/entity-linking",
+    "model_annotater": "http://example.org/model_annotation",
     "decide_system": "http://example.org/DECIDe",
     "translator": "http://example.org/translation",
 }

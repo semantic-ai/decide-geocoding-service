@@ -19,6 +19,6 @@ class LlmTaskInput(BaseModel):
 
 
 class EntityLinkingTaskOutput(BaseModel):
-    designated_class: str = Field(
-        description="String containing the name of the class that best designates the provided decision"
+    designated_classes: list[str] = Field(
+        description="List of strings containing the name(s) of the class(es) that best designates the provided decision"
     )
