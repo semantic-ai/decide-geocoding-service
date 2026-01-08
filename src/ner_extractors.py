@@ -16,7 +16,7 @@ import spacy
 from flair.data import Sentence
 from typing import List, Dict, Any
 from .ner_models import model_manager
-from .ner_config import REGEX_PATTERNS, DEFAULT_SETTINGS, TITLE_EXTRACTION_INSTRUCTION, NER_MODELS
+from .ner_config import REGEX_PATTERNS, DEFAULT_SETTINGS, TITLE_EXTRACTION_INSTRUCTION, NER_MODELS, LABEL_MAPPINGS
 
 
 # ============================================================================
@@ -86,9 +86,10 @@ class SpacyGeoAnalyzer:
 class BaseExtractor:
     """Base class for all NER extractors."""
     
-    def __init__(self, language: str = 'en'):
+    def __init__(self, language: str = 'en', extractor_type: str = None):
         self.language = language
         self.settings = DEFAULT_SETTINGS.copy()
+        self.extractor_type = extractor_type
     
     def extract(self, text: str) -> List[Dict[str, Any]]:
         """
@@ -98,34 +99,109 @@ class BaseExtractor:
             text: Input text to process
             
         Returns:
-            List of entity dictionaries with keys: text, label, start, end
+            List of entity dictionaries with keys: text, label, start, end, confidence
         """
         raise NotImplementedError
     
-    def _deduplicate_entities(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Remove duplicate entities based on span and label."""
-        if not self.settings['deduplicate']:
-            return entities
+    def _normalize_entity(self, entity: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize entity: apply label mapping and normalize text/label format.
         
-        seen = set()
-        deduped = []
+        Args:
+            entity: Entity dictionary with 'text', 'label', 'start', 'end', optionally 'confidence'
+            
+        Returns:
+            Normalized entity dictionary (new copy, doesn't mutate input)
+        """
+        entity = dict(entity)
         
-        for entity in entities:
-            key = (entity['start'], entity['end'], entity['label'])
-            if key not in seen:
-                seen.add(key)
-                deduped.append(entity)
+        entity['text'] = entity['text'].strip()
         
-        return deduped
+        label = entity['label'].upper()
+        
+        if self.extractor_type and self.extractor_type in LABEL_MAPPINGS:
+            mapping = LABEL_MAPPINGS[self.extractor_type]
+            entity['label'] = mapping.get(label, label).upper()
+        else:
+            entity['label'] = label
+        
+        return entity
+    
+    def _resolve_overlaps(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Resolve overlapping entities by keeping the one with highest confidence.
+        When confidence ties, prefer longer spans.
+        Only removes overlapping entities if they have the same label (entity type).
+        
+        Args:
+            entities: List of entities
+            
+        Returns:
+            List of entities (overlapping entities with same label resolved)
+        """
+        if not entities:
+            return []
+        
+        # Sort by (confidence desc, length desc) - prefer higher confidence, then longer spans
+        sorted_entities = sorted(
+            entities, 
+            key=lambda x: (x.get('confidence', 1.0), x['end'] - x['start']), 
+            reverse=True
+        )
+        
+        resolved = []
+        for entity in sorted_entities:
+            # Check if this entity overlaps with any already resolved entity of the SAME label
+            # Using half-open intervals [start, end): ranges overlap if not (end1 <= start2 or end2 <= start1)
+            overlaps_same_label = any(
+                not (entity['end'] <= existing['start'] or existing['end'] <= entity['start'])
+                and entity['label'] == existing['label']
+                for existing in resolved
+            )
+            if not overlaps_same_label:
+                resolved.append(entity)
+        
+        return resolved
+    
+    def post_process_entities(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Post-process entities: normalize and resolve overlaps.
+        
+        Normalizes entity text/labels, applies label mappings, and resolves overlapping
+        entities with the same label by keeping the highest confidence one.
+        
+        Args:
+            entities: List of raw entity dictionaries
+            
+        Returns:
+            List of normalized and processed entities
+        """
+        if not self.settings['post_process']:
+            # Still normalize entities even if post-processing is disabled
+            return [self._normalize_entity(e) for e in entities]
+        
+        # Normalize all entities first
+        normalized = [self._normalize_entity(e) for e in entities]
+        
+        # Resolve overlaps (this also handles exact duplicates since they overlap)
+        return self._resolve_overlaps(normalized)
 
 
 class SpacyExtractor(BaseExtractor):
     """Extract entities using spaCy models."""
     
+    def __init__(self, language: str = 'en'):
+        super().__init__(language, extractor_type='spacy')
+    
     def extract(self, text: str) -> List[Dict[str, Any]]:
         """Extract entities using spaCy NER."""
         try:
             nlp = model_manager.get_spacy_model(self.language)
+            
+            if nlp is None:
+                logging.warning(f"spaCy model not available for language '{self.language}'")
+                return []
+            
             doc = nlp(text)
             
             entities = []
@@ -134,13 +210,48 @@ class SpacyExtractor(BaseExtractor):
                     'text': ent.text,
                     'label': ent.label_,
                     'start': ent.start_char,
-                    'end': ent.end_char
+                    'end': ent.end_char,
+                    'confidence': 0.7  # spaCy doesn't provide confidence scores for NER
                 })
             
-            return self._deduplicate_entities(entities)
+            return self.post_process_entities(entities)
             
         except Exception as e:
-            print(f"Error in spaCy extraction ({self.language}): {e}")
+            logging.warning(f"Error in spaCy extraction ({self.language}): {e}")
+            return []
+
+
+class HuggingFaceExtractor(BaseExtractor):
+    """Extract entities using Hugging Face transformers pipeline."""
+    
+    def __init__(self, language: str = 'en'):
+        super().__init__(language, extractor_type='huggingface')
+    
+    def extract(self, text: str) -> List[Dict[str, Any]]:
+        """Extract entities using Hugging Face NER pipeline."""
+        try:
+            ner_pipeline = model_manager.get_huggingface_model(self.language)
+            
+            if ner_pipeline is None:
+                logging.warning(f"HuggingFace model not available for language '{self.language}'")
+                return []
+            
+            results = ner_pipeline(text)
+            
+            entities = []
+            for result in results:
+                entities.append({
+                    'text': result['word'],
+                    'label': result['entity_group'],
+                    'start': result['start'],
+                    'end': result['end'],
+                    'confidence': result.get('score', 1.0)
+                })
+            
+            return self.post_process_entities(entities)
+            
+        except Exception as e:
+            logging.warning(f"Error in HuggingFace extraction ({self.language}): {e}")
             return []
 
 
@@ -148,23 +259,18 @@ class FlairExtractor(BaseExtractor):
     """Extract entities using Flair models."""
     
     def __init__(self, language: str = 'de', model_name: str = None):
-        super().__init__(language)
-        self.model_name = model_name or self._get_default_model()
-    
-    def _get_default_model(self) -> str:
-        """Get default Flair model based on language."""
-        model_mapping = {
-            'de': 'flair/ner-german-legal',
-            'en': 'flair/ner-english',
-            'nl': 'flair/ner-dutch'
-        }
-        return model_mapping.get(self.language, 'flair/ner-english')
+        super().__init__(language, extractor_type='flair')
+        self.model_name = model_name  # Optional override, otherwise uses language from config
     
     def extract(self, text: str) -> List[Dict[str, Any]]:
         """Extract entities using Flair NER."""
         try:
-            # Load the Flair SequenceTagger model
-            tagger = model_manager.get_flair_model(self.model_name)
+            # Load the Flair SequenceTagger model using language from config or explicit model_name
+            tagger = model_manager.get_flair_model(language=self.language, model_name=self.model_name)
+            
+            if tagger is None:
+                logging.warning(f"Flair model not available for language '{self.language}'")
+                return []
             
             # Create sentence (don't use tokenizer for legal texts as recommended)
             sentence = Sentence(text, use_tokenizer=False)
@@ -175,17 +281,20 @@ class FlairExtractor(BaseExtractor):
             entities = []
             # Iterate over entities and extract information
             for entity in sentence.get_spans('ner'):
+                label_obj = entity.get_label('ner')
                 entities.append({
                     'text': entity.text,
-                    'label': entity.get_label('ner').value,
+                    'label': label_obj.value,
                     'start': entity.start_position,
-                    'end': entity.end_position
+                    'end': entity.end_position,
+                    'confidence': label_obj.score
                 })
             
-            return self._deduplicate_entities(entities)
+            return self.post_process_entities(entities)
             
         except Exception as e:
-            print(f"Error in Flair extraction ({self.model_name}): {e}")
+            model_info = self.model_name or f"config({self.language})"
+            logging.warning(f"Error in Flair extraction ({model_info}): {e}")
             return []
 
 
@@ -193,7 +302,7 @@ class TitleExtractor(BaseExtractor):
     """Extract document title using Hugging Face Gemma model."""
     
     def __init__(self, language: str = 'nl'):
-        super().__init__(language)
+        super().__init__(language, extractor_type='title')
     
     def extract(self, text: str) -> List[Dict[str, Any]]:
         """
@@ -247,7 +356,8 @@ class TitleExtractor(BaseExtractor):
                         'text': title,
                         'label': 'TITLE',
                         'start': start_pos,
-                        'end': start_pos + len(title)
+                        'end': start_pos + len(title),
+                        'confidence': 1.0  # LLM doesn't provide confidence, default to 1.0
                     }]
                 else:
                     # Title generated/extracted but not exact match in text
@@ -256,14 +366,15 @@ class TitleExtractor(BaseExtractor):
                         'text': title,
                         'label': 'TITLE',
                         'start': 0,
-                        'end': 0
+                        'end': 0,
+                        'confidence': 0.8  # Lower confidence for generated titles
                     }]
                 return entities
             
             return []
             
         except Exception as e:
-            print(f"Error in title extraction: {e}")
+            logging.warning(f"Error in title extraction: {e}")
             return []
 
 
@@ -271,7 +382,7 @@ class RegexExtractor(BaseExtractor):
     """Extract entities using regex patterns."""
     
     def __init__(self, language: str = 'en', patterns: Dict[str, List[str]] = None):
-        super().__init__(language)
+        super().__init__(language, extractor_type='regex')
         self.patterns = patterns or {}
         self._compiled_patterns = {}
         self._compile_patterns()
@@ -295,10 +406,11 @@ class RegexExtractor(BaseExtractor):
                         'text': match.group(0),
                         'label': label,
                         'start': match.start(),
-                        'end': match.end()
+                        'end': match.end(),
+                        'confidence': 1.0  # Regex matches are deterministic
                     })
         
-        return self._deduplicate_entities(entities)
+        return self.post_process_entities(entities)
 
 
 class LanguageRegexExtractor(RegexExtractor):
@@ -333,32 +445,32 @@ class CompositeExtractor(BaseExtractor):
                 entities = extractor.extract(text)
                 all_entities.extend(entities)
             except Exception as e:
-                print(f"Error in extractor {type(extractor).__name__}: {e}")
+                logging.warning(f"Error in extractor {type(extractor).__name__}: {e}")
                 continue
         
-        return self._deduplicate_entities(all_entities)
+        return self.post_process_entities(all_entities)
 
 
 # Pre-configured extractors for common use cases
-def create_german_extractor() -> CompositeExtractor:
+def create_german_composite_extractor() -> CompositeExtractor:
     """Create a comprehensive German NER extractor using Flair's legal model."""
     return CompositeExtractor([
-        FlairExtractor('de', 'flair/ner-german-legal'),
+        FlairExtractor('de'),  # Uses config: NER_MODELS['flair']['de']
         LanguageRegexExtractor('de')
     ])
 
 
-def create_dutch_extractor() -> CompositeExtractor:
+def create_dutch_composite_extractor() -> CompositeExtractor:
     """Create a comprehensive Dutch NER extractor."""
     return CompositeExtractor([
-        SpacyExtractor('nl'),
+        HuggingFaceExtractor('nl'),
         LanguageRegexExtractor('nl')
     ])
 
 
-def create_english_extractor() -> CompositeExtractor:
+def create_english_composite_extractor() -> CompositeExtractor:
     """Create a comprehensive English NER extractor."""
     return CompositeExtractor([
-        SpacyExtractor('en'),
+        HuggingFaceExtractor('en'),
         LanguageRegexExtractor('en')  # Will be empty unless patterns are added
     ])

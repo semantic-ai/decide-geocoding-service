@@ -5,12 +5,24 @@ This module contains all configuration settings, model names, and constants
 used by the NER extraction system.
 """
 
+import os
+
 # Model Configuration
 NER_MODELS = {
     'spacy': {
         'nl': 'nl_core_news_sm',
         'de': 'de_core_news_sm',
         'en': 'en_core_web_sm'
+    },
+    'flair': {
+        'de': 'flair/ner-german-legal',
+        'en': 'flair/ner-english',
+        'nl': 'flair/ner-dutch'
+    },
+    'huggingface': {
+        'nl': 'PedroDKE/multilingual-ner-abb',
+        'en': 'PedroDKE/multilingual-ner-abb',
+        'aggregation_strategy': 'simple'
     },
     'title_extraction': {
         'model': 'javdrher/decide-gemma3-270m',
@@ -58,11 +70,25 @@ TITLE_EXTRACTION_INSTRUCTION = """
     The title should be the main heading or subject of the document.
 """
 
-# Default extraction settings
+LABEL_MAPPINGS = {
+    'spacy': {
+        'PER': 'PERSON',
+        'ORG': 'ORGANIZATION',
+        'LOC': 'LOCATION',
+        'GPE': 'LOCATION', 
+        'MISC': 'MISCELLANEOUS',
+    },
+    'flair': {
+        'PER': 'PERSON',
+        'ORG': 'ORGANIZATION',
+        'LOC': 'LOCATION',
+    },
+    'huggingface': {}, 
+    'regex': {},
+}
+
 DEFAULT_SETTINGS = {
-    'language': 'nl',
-    'method': 'regex',
-    'deduplicate': True,
-    'min_confidence': 0.5,
-    'max_entities': 1000
+    'language': os.getenv('NER_DEFAULT_LANGUAGE', 'nl'),
+    'method': os.getenv('NER_DEFAULT_METHOD', 'composite'),
+    'post_process': os.getenv('NER_POST_PROCESS', 'true').lower() == 'true',
 }

@@ -17,8 +17,9 @@ from escape_helpers import sparql_escape_uri, sparql_escape_string
 from .helper_functions import clean_string, get_start_end_offsets, process_text, geocode_detectable
 from .ner_extractors import SpacyGeoAnalyzer
 from .ner_functions import extract_entities
+from .ner_config import DEFAULT_SETTINGS
 from .nominatim_geocoder import NominatimGeocoder
-from .annotation import GeoAnnotation, LinkingAnnotation, TripletAnnotation
+from .annotation import GeoAnnotation, LinkingAnnotation, TripletAnnotation, NERAnnotation
 from .sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES, LANGUAGE_CODE_TO_URI, LANGUAGE_URI_TO_CODE
 from .llm_models.llm_model_clients import OpenAIModel
 from .llm_models.llm_task_models import LlmTaskInput, EntityLinkingTaskOutput
@@ -48,7 +49,6 @@ class Task(ABC):
     def lookup(cls, task_type: str) -> Optional['Task']:
         """
         Yield all subclasses of the given class, per:
-        https://adamj.eu/tech/2024/05/10/python-all-subclasses/
         """
         for subclass in cls.supported_operations():
             if hasattr(subclass, '__task_type__') and subclass.__task_type__ == task_type:
@@ -204,7 +204,6 @@ class GeoExtractionTask(DecisionTask):
         if hasattr(doc, 'error'):
             self.logger.error(f"Error: {doc['error']}")
         else:
-            # Geocoding Results
             if detectables:
                 self.logger.info("Geocoding Results")
 
@@ -251,8 +250,8 @@ class EntityExtractionTask(DecisionTask):
             obj=sparql_escape_uri(LANGUAGE_CODE_TO_URI.get(language)),
             activity_id=self.task_uri,
             source_uri=source_uri,
-            start=0,
-            end=0,
+            start=None,
+            end=None,
             agent=AI_COMPONENTS["ner_extractor"],
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore()
@@ -273,15 +272,36 @@ class EntityExtractionTask(DecisionTask):
                 ).add_to_triplestore()
                 self.logger.info(f"Created Title triplet suggestion for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
 
-    def extract_general_entities(self, task_data: str, language: str = 'dutch', method: str = 'regex') -> list[dict[str, Any]]:
+    def create_general_entity_annotations(self, source_uri: str, entities: list[dict[str, Any]]):
+        """Create annotations for general entities (DATE, PERSON, ORG, etc.)"""
+        for entity in entities:
+            NERAnnotation(
+                activity_id=self.task_uri,
+                source_uri=source_uri,
+                class_uri=entity['label'],
+                start=entity['start'],
+                end=entity['end'],
+                agent=AI_COMPONENTS["ner_extractor"],
+                agent_type=AGENT_TYPES["ai_component"],
+                confidence=entity.get('confidence', 1.0)
+            ).add_to_triplestore()
+            confidence_str = f" (confidence: {entity.get('confidence', 1.0):.2f})" if 'confidence' in entity else ""
+            self.logger.info(f"Created NER annotation for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]{confidence_str}")
+
+    def extract_general_entities(self, task_data: str, language: str = None, method: str = None) -> list[dict[str, Any]]:
         """
         Extract general NER entities (PERSON, ORG, DATE, etc.) from text.
         
         Args:
             task_data: Text to extract entities from
-            language: Language for extraction ('dutch', 'german', 'english')
-            method: Extraction method ('regex', 'spacy', 'flair', 'composite', 'title')
+            language: Language for extraction ('nl', 'de', 'en'). Defaults to DEFAULT_SETTINGS['language'].
+            method: Extraction method ('regex', 'spacy', 'flair', 'composite', 'huggingface'). Defaults to DEFAULT_SETTINGS['method'].
         """
+        if language is None:
+            language = DEFAULT_SETTINGS['language']
+        if method is None:
+            method = DEFAULT_SETTINGS['method']
+        
         self.logger.info(f"Extracting general entities using {method}/{language}")
         
         # Extract entities using the factory pattern
@@ -307,14 +327,13 @@ class EntityExtractionTask(DecisionTask):
 
         self.create_language_relation(self.source, language)
 
-        # Uses defaults from ner_config.py: language='dutch', method='regex'
-        # Language can be passed in future when extracted from database
-        #entities = self.extract_general_entities(eli_expression, language)
-
-        # todo to be improved upon a lot by inserting functions to create the other predicates
-        # ELI properties
-        entities = extract_entities(eli_expression, language=language, method='title')
-        self.create_title_relation(self.source, entities)
+        # Extract title using LLM-based title extraction
+        title_entities = extract_entities(eli_expression, language=language, method='title')
+        self.create_title_relation(self.source, title_entities)
+        
+        # Extract general entities (DATE, etc.) - uses DEFAULT_SETTINGS['method'] from ner_config
+        general_entities = self.extract_general_entities(eli_expression, language=language)
+        self.create_general_entity_annotations(self.source, general_entities)
 
 
 class ModelAnnotatingTask(DecisionTask):
@@ -682,8 +701,8 @@ class TranslationTask(DecisionTask):
             obj=sparql_escape_uri(LANGUAGE_CODE_TO_URI[target_language]),
             activity_id=self.task_uri,
             source_uri=translation_annotation_uri,
-            start=0,
-            end=0,
+            start=None,
+            end=None,
             agent=AI_COMPONENTS["translator"],
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore()
@@ -707,8 +726,8 @@ class TranslationTask(DecisionTask):
             obj=sparql_escape_string(translated_text),
             activity_id=self.task_uri,
             source_uri=source_uri,
-            start=0,
-            end=0,
+            start=None,
+            end=None,
             agent=AI_COMPONENTS["translator"],
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore()
