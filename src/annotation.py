@@ -153,7 +153,13 @@ class LinkingAnnotation(Annotation):
             user=sparql_escape_uri(self.agent),
             clz = sparql_escape_uri(self.class_uri)
         )
-        query(query_string)
+        try:
+            query(query_string)
+        except Exception as e:
+            self.logger = logging.getLogger(self.__class__.__name__)
+            error_msg = f"Failed to insert LinkingAnnotation to triplestore for source {self.source_uri}: {e}"
+            self.logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg) from e
 
 
 class NERAnnotation(Annotation):
@@ -275,7 +281,13 @@ class NERAnnotation(Annotation):
             selector_filter=selector_filter
         )
 
-        query(query_string)
+        try:
+            query(query_string)
+        except Exception as e:
+            self.logger = logging.getLogger(self.__class__.__name__)
+            error_msg = f"Failed to insert NERAnnotation to triplestore for source {self.source_uri}: {e}"
+            self.logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg) from e
 
     def _build_selector_parts(self, part_of_id: str, uri: str):
         """Helper method to build selector SPARQL parts conditionally.
@@ -520,5 +532,11 @@ class TripletAnnotation(NERAnnotation):
             selector_part=selector_part,
             selector_filter=selector_filter
         )
-        query(query_string)
+        try:
+            query(query_string)
+        except Exception as e:
+            self.logger = logging.getLogger(self.__class__.__name__)
+            error_msg = f"Failed to insert TripletAnnotation to triplestore for subject {self.subject}: {e}"
+            self.logger.error(error_msg, exc_info=True)
+            raise RuntimeError(error_msg) from e
         return annotation_uri

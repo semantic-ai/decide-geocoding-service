@@ -116,16 +116,12 @@ LANGUAGE_CODE_TO_URI = {
     'nl': "http://publications.europa.eu/resource/authority/language/NLD",
     'de': "http://publications.europa.eu/resource/authority/language/DEU",
     'en': "http://publications.europa.eu/resource/authority/language/ENG",
-    'fr': "http://publications.europa.eu/resource/authority/language/FRA",
-    'es': "http://publications.europa.eu/resource/authority/language/SPA"
 }
 
 LANGUAGE_URI_TO_CODE = {
     "http://publications.europa.eu/resource/authority/language/NLD": "nl",
     "http://publications.europa.eu/resource/authority/language/DEU": "de",
     "http://publications.europa.eu/resource/authority/language/ENG": "en",
-    "http://publications.europa.eu/resource/authority/language/FRA": "fr",
-    "http://publications.europa.eu/resource/authority/language/SPA": "es"
 }
 
 # ==============================================================================
