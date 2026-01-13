@@ -16,7 +16,8 @@ import spacy
 from flair.data import Sentence
 from typing import List, Dict, Any
 from .ner_models import model_manager
-from .ner_config import REGEX_PATTERNS, DEFAULT_SETTINGS, TITLE_EXTRACTION_INSTRUCTION, NER_MODELS, LABEL_MAPPINGS
+from .ner_config import REGEX_PATTERNS, TITLE_EXTRACTION_INSTRUCTION, NER_MODELS, LABEL_MAPPINGS
+from .config import get_config
 
 
 # ============================================================================
@@ -88,7 +89,7 @@ class BaseExtractor:
     
     def __init__(self, language: str = 'en', extractor_type: str = None):
         self.language = language
-        self.settings = DEFAULT_SETTINGS.copy()
+        self.config = get_config()
         self.extractor_type = extractor_type
     
     def extract(self, text: str) -> List[Dict[str, Any]]:
@@ -176,7 +177,7 @@ class BaseExtractor:
         Returns:
             List of normalized and processed entities
         """
-        if not self.settings['post_process']:
+        if not self.config.ner.post_process:
             # Still normalize entities even if post-processing is disabled
             return [self._normalize_entity(e) for e in entities]
         

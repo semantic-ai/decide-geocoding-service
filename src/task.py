@@ -17,7 +17,7 @@ from escape_helpers import sparql_escape_uri, sparql_escape_string
 from .helper_functions import clean_string, get_start_end_offsets, process_text, geocode_detectable
 from .ner_extractors import SpacyGeoAnalyzer
 from .ner_functions import extract_entities
-from .ner_config import DEFAULT_SETTINGS
+from .config import get_config
 from .nominatim_geocoder import NominatimGeocoder
 from .annotation import GeoAnnotation, LinkingAnnotation, TripletAnnotation, NERAnnotation
 from .sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES, LANGUAGE_CODE_TO_URI, LANGUAGE_URI_TO_CODE
@@ -190,9 +190,9 @@ class GeoExtractionTask(DecisionTask):
     """Task that geocodes location information from text."""
 
     __task_type__ = TASK_OPERATIONS["geo_extraction"]
-
-    ner_analyzer = SpacyGeoAnalyzer(model_path=os.getenv("NER_MODEL_PATH"), labels=json.loads(os.getenv("NER_LABELS")))
-    geocoder = NominatimGeocoder(base_url=os.getenv("NOMINATIM_BASE_URL"), rate_limit=0.5)
+    config = get_config()
+    ner_analyzer = SpacyGeoAnalyzer(model_path=os.getenv("NER_MODEL_PATH"), labels=config.ner.labels)
+    geocoder = NominatimGeocoder(base_url=str(config.geocoding.nominatim_base_url), rate_limit=0.5)
 
     def apply_geo_entities(self, task_data: str):
         """Extract geographic entities from text and store as annotations."""
@@ -294,13 +294,14 @@ class EntityExtractionTask(DecisionTask):
         
         Args:
             task_data: Text to extract entities from
-            language: Language for extraction ('nl', 'de', 'en'). Defaults to DEFAULT_SETTINGS['language'].
-            method: Extraction method ('regex', 'spacy', 'flair', 'composite', 'huggingface'). Defaults to DEFAULT_SETTINGS['method'].
+            language: Language for extraction ('nl', 'de', 'en'). Defaults to config.ner.language.
+            method: Extraction method ('regex', 'spacy', 'flair', 'composite', 'huggingface'). Defaults to config.ner.method.
         """
+        config = get_config()
         if language is None:
-            language = DEFAULT_SETTINGS['language']
+            language = config.ner.language
         if method is None:
-            method = DEFAULT_SETTINGS['method']
+            method = config.ner.method
         
         self.logger.info(f"Extracting general entities using {method}/{language}")
         
@@ -331,7 +332,7 @@ class EntityExtractionTask(DecisionTask):
         title_entities = extract_entities(eli_expression, language=language, method='title')
         self.create_title_relation(self.source, title_entities)
         
-        # Extract general entities (DATE, etc.) - uses DEFAULT_SETTINGS['method'] from ner_config
+        # Extract general entities (DATE, etc.) - uses config.ner.method from config.json
         general_entities = self.extract_general_entities(eli_expression, language=language)
         self.create_general_entity_annotations(self.source, general_entities)
 
@@ -349,9 +350,10 @@ class ModelAnnotatingTask(DecisionTask):
             self.logger = logging.getLogger(self.__class__.__name__)
             self.source = source
 
+        config = get_config()
         self._llm_config = {
-            "model_name": os.getenv("LLM_MODEL_NAME"),
-            "temperature": float(os.getenv("LLM_TEMPERATURE")),
+            "model_name": config.llm.model_name,
+            "temperature": config.llm.temperature,
         }
 
         self._llm_system_message = "You are a juridical and administrative assistant that must determine the best matching codes from a list with a given text."
@@ -397,8 +399,10 @@ class ModelAnnotatingTask(DecisionTask):
                 ]
 
         classes: list[str] = []
-        if not os.getenv("OPENAI_API_KEY"):
-            self.logger.warning("OPENAI_API_KEY missing; using dummy SDG label for testing.")
+        config = get_config()
+        api_key = config.llm.api_key.get_secret_value() if config.llm.api_key else None
+        if not api_key:
+            self.logger.warning("OpenAI API key missing (config.llm.api_key), using dummy SDG label for testing.")
             classes = [random.choice(sdgs).replace(" ", "_")]
         else:
             try:
@@ -590,13 +594,15 @@ class TranslationTask(DecisionTask):
     def __init__(self, task_uri: str):
         super().__init__(task_uri)
         
-        self.target_language = os.getenv("TRANSLATION_TARGET_LANG", "en")
+        config = get_config()
+        self.target_language = config.translation.target_language
         self._translator = None
     
     def get_translator(self):
-        """Lazy load translator based on TRANSLATION_PROVIDER env var."""
+        """Lazy load translator based on config.translation.provider."""
         if self._translator is None:
-            provider = os.getenv("TRANSLATION_PROVIDER", "huggingface").lower()
+            config = get_config()
+            provider = config.translation.provider.lower()
             self.logger.info(f"Initializing translator provider: {provider}")
 
             if provider == "auto":
