@@ -1,0 +1,24 @@
+{
+  "app": {
+    "mode": "development",
+    "log_level": "debug"
+  },
+  "ner": {
+    "language": "nl",
+    "method": "composite",
+    "post_process": true,
+    "labels": ["CITY", "DOMAIN", "HOUSENUMBERS", "INTERSECTION", "POSTCODE", "PROVINCE", "ROAD", "STREET"]
+  },
+  "geocoding": {
+    "nominatim_base_url": "http://nominatim:8080"
+  },
+  "llm": {
+    "model_name": "gpt-4o-mini",
+    "temperature": 0.1,
+    "api_key": null
+  },
+  "translation": {
+    "target_language": "en",
+    "provider": "huggingface"
+  }
+}
