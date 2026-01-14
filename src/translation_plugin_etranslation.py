@@ -7,8 +7,6 @@ import time
 import logging
 import requests
 import threading
-import subprocess
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from dataclasses import dataclass
 from typing import Optional, Dict, Tuple
 
@@ -22,9 +20,6 @@ from translatepy.models import TranslationResult
 # Key: (requestId, targetLanguage) -> callback payload
 _callback_storage: Dict[Tuple[int, str], Dict] = {}
 _callback_lock = threading.Lock()
-_callback_server: Optional[HTTPServer] = None
-_callback_server_thread: Optional[threading.Thread] = None
-_ngrok_started: bool = False
 
 
 @dataclass
@@ -38,11 +33,8 @@ class Config:
     timeout_seconds: float
     callback_wait_timeout: float
     max_text_length: int
-    callback_host: str
-    callback_port: int
     callback_url: Optional[str]
     callback_url_host: Optional[str]
-    ngrok_authtoken: Optional[str]
     
     @classmethod
     def from_env(cls) -> 'Config':
@@ -62,101 +54,9 @@ class Config:
             timeout_seconds=float(os.getenv("ETRANSLATION_TIMEOUT", "60")),
             callback_wait_timeout=float(os.getenv("ETRANSLATION_CALLBACK_TIMEOUT", "600")),
             max_text_length=int(os.getenv("ETRANSLATION_MAX_TEXT_LENGTH", "4000")),
-            callback_host=os.getenv("ETRANSLATION_CALLBACK_HOST", "0.0.0.0"),
-            callback_port=int(os.getenv("ETRANSLATION_CALLBACK_PORT", "8888")),
             callback_url=callback_url_env,
             callback_url_host=os.getenv("ETRANSLATION_CALLBACK_URL_HOST"),
-            ngrok_authtoken=os.getenv("NGROK_AUTHTOKEN"),
         )
-
-
-class CallbackHandler(BaseHTTPRequestHandler):
-    """HTTP handler for eTranslation callbacks."""
-    
-    def do_POST(self):
-        """Handle POST requests from eTranslation callback."""
-        content_length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(content_length)
-        
-        try:
-            data = json.loads(body.decode('utf-8'))
-            request_id = data.get('requestId')
-            
-            # Handle failure callbacks: errorCode + errorMessage + targetLanguages (array)
-            if "errorCode" in data and "targetLanguages" in data:
-                req_id = int(data.get("requestId"))
-                target_langs = data.get("targetLanguages", [])
-                for t in target_langs:
-                    key = (req_id, str(t).upper())
-                    with _callback_lock:
-                        _callback_storage[key] = data
-                self._send_response(200, {"status": "received"})
-                logging.getLogger(__name__).info(
-                    f"Failure callback: requestId={req_id}, targets={target_langs}, error={data.get('errorCode')}"
-                )
-                return
-            
-            # Extract targetLanguage from callback payload
-            target_lang = (
-                data.get('targetLanguage') or 
-                data.get('target_language') or
-                data.get('targetLang') or
-                (data.get('result') and isinstance(data.get('result'), dict) and data.get('result', {}).get('targetLanguage')) or
-                None
-            )
-            
-            if request_id and target_lang:
-                key = (int(request_id), str(target_lang).upper())
-                with _callback_lock:
-                    _callback_storage[key] = data
-                self._send_response(200, {"status": "received"})
-                logging.getLogger(__name__).info(f"Callback: requestId={request_id}, target={target_lang}")
-            elif request_id:
-                # Fallback: store with UNKNOWN target
-                key = (int(request_id), "UNKNOWN")
-                with _callback_lock:
-                    _callback_storage[key] = data
-                self._send_response(200, {"status": "received"})
-                logging.getLogger(__name__).warning(f"Callback without targetLanguage: requestId={request_id}")
-            else:
-                self.send_response(400)
-                self.end_headers()
-                logging.getLogger(__name__).warning(f"Callback without requestId: {data}")
-        except Exception as e:
-            logging.getLogger(__name__).error(f"Error processing callback: {e}", exc_info=True)
-            self.send_response(500)
-            self.end_headers()
-    
-    def _send_response(self, status: int, data: dict):
-        """Helper to send JSON response."""
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json')
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
-    
-    def log_message(self, format, *args):
-        """Suppress default logging."""
-        pass
-
-
-def _start_callback_server(host: str = "0.0.0.0", port: int = 8888) -> Tuple[str, int]:
-    """Start callback server in background thread. Returns (host, port)."""
-    global _callback_server, _callback_server_thread
-    
-    if _callback_server is not None:
-        return host, port
-    
-    try:
-        _callback_server = HTTPServer((host, port), CallbackHandler)
-        _callback_server_thread = threading.Thread(
-            target=_callback_server.serve_forever,
-            daemon=True
-        )
-        _callback_server_thread.start()
-        logging.getLogger(__name__).info(f"Callback server started on {host}:{port}")
-        return host, port
-    except OSError:
-        return _start_callback_server(host, port + 1)
 
 
 class ETRanslationService(BaseTranslator):
@@ -173,12 +73,7 @@ class ETRanslationService(BaseTranslator):
         if not self.config.bearer_token and not (self.config.username and self.config.password):
             self.logger.warning("ETRANSLATION_BEARER_TOKEN or (ETRANSLATION_USERNAME/ETRANSLATION_PASSWORD) not set")
         
-        # Start callback server
-        self.logger.info(f"Starting callback server on {self.config.callback_host}:{self.config.callback_port}")
-        _start_callback_server(self.config.callback_host, self.config.callback_port)
-        time.sleep(1)
-        
-        # Setup callback base URL
+        # Setup callback base URL (must be publicly reachable by eTranslation)
         self.callback_base_url = self._setup_callback_url()
         
         # Guard: fail fast if callback URL is localhost
@@ -189,111 +84,32 @@ class ETRanslationService(BaseTranslator):
             )
 
     def _setup_callback_url(self) -> str:
-        """Setup callback base URL from config or ngrok."""
+        """Setup callback base URL from explicit config.
+
+        This must resolve to a publicly reachable URL so that
+        eTranslation can POST callbacks to it, as described in
+        the official REST v2 documentation:
+        https://language-tools.ec.europa.eu/dev-corner/etranslation/rest-v2/text
+        """
         if self.config.callback_url:
             self.logger.info(f"Using callback URL: {self.config.callback_url}")
             return self.config.callback_url
         
-        # Try ngrok
-        ngrok_url = self._ensure_ngrok(self.config.callback_port)
-        if ngrok_url:
-            return ngrok_url
-        
         # Fallback to callback_url_host
-        if self.config.callback_url_host and self.config.callback_url_host != "localhost":
-            url = f"http://{self.config.callback_url_host}:{self.config.callback_port}"
+        if (
+            self.config.callback_url_host
+            and self.config.callback_url_host not in {"localhost", "127.0.0.1"}
+        ):
+            # Assume the host already maps to the correct HTTP(S) endpoint.
+            url = f"http://{self.config.callback_url_host}"
             self.logger.warning(f"Using callback URL host: {url}")
             return url
         
         raise RuntimeError(
             "No public callback URL available. Options:\n"
             "  1. Set ETRANSLATION_CALLBACK_URL to your public URL\n"
-            "  2. Install and configure ngrok (set NGROK_AUTHTOKEN)\n"
-            "  3. Set ETRANSLATION_CALLBACK_URL_HOST to your public IP/hostname"
+            "  2. Set ETRANSLATION_CALLBACK_URL_HOST to your public IP/hostname"
         )
-
-    def _ensure_ngrok(self, port: int) -> Optional[str]:
-        """
-        Ensure ngrok tunnel is running and return public URL.
-        Merges start + fetch URL logic into one helper.
-        Prefers HTTPS; uses --region=eu --bind-tls=true flags.
-        """
-        global _ngrok_started
-        
-        if _ngrok_started:
-            return self._fetch_ngrok_url()
-        
-        # Check if ngrok is available
-        try:
-            subprocess.run(["ngrok", "version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            self.logger.warning("ngrok not found")
-            return None
-        
-        # Set authtoken if provided
-        if self.config.ngrok_authtoken:
-            try:
-                subprocess.run(["ngrok", "authtoken", self.config.ngrok_authtoken],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            except subprocess.CalledProcessError:
-                self.logger.warning("Failed to set ngrok authtoken")
-        
-        # Start ngrok with HTTPS preference
-        try:
-            self.logger.info(f"Starting ngrok tunnel on port {port}")
-            process = subprocess.Popen(
-                ["ngrok", "http", str(port), "--region=eu", "--log=stdout"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1
-            )
-            _ngrok_started = True
-            time.sleep(3)
-            
-            if process.poll() is not None:
-                self.logger.error("ngrok process exited immediately")
-                return None
-            
-            public_url = self._fetch_ngrok_url()
-            if public_url:
-                self.logger.info(f"ngrok tunnel: {public_url}")
-                return public_url
-            else:
-                self.logger.error("ngrok started but could not fetch tunnel URL")
-                return None
-        except Exception as e:
-            self.logger.warning(f"Failed to start ngrok: {e}")
-            return None
-
-    def _fetch_ngrok_url(self, attempts: int = 30, delay: float = 1.0) -> Optional[str]:
-        """Fetch ngrok tunnel URL from API, preferring HTTPS."""
-        for attempt in range(attempts):
-            try:
-                r = requests.get("http://localhost:4040/api/tunnels", timeout=2)
-                r.raise_for_status()
-                tuns = r.json().get("tunnels", [])
-                
-                if not tuns:
-                    if attempt % 5 == 0:
-                        self.logger.debug(f"Waiting for ngrok tunnel... ({attempt + 1}/{attempts})")
-                    time.sleep(delay)
-                    continue
-                
-                # Prefer HTTPS, fallback to HTTP
-                https = next((t for t in tuns if t.get("proto") == "https"), None)
-                if https and https.get("public_url"):
-                    return https["public_url"].rstrip('/')
-                
-                http = next((t for t in tuns if t.get("proto") == "http"), None)
-                if http and http.get("public_url"):
-                    self.logger.warning("Using HTTP tunnel (HTTPS not available)")
-                    return http["public_url"].rstrip('/')
-            except Exception as e:
-                if attempt % 5 == 0:
-                    self.logger.debug(f"ngrok API not ready: {e} ({attempt + 1}/{attempts})")
-            time.sleep(delay)
-        return None
 
     def _get_lang_code(self, language) -> str:
         """Convert language to ISO 639-1 code string."""
