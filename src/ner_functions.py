@@ -19,7 +19,8 @@ from .ner_extractors import (
     FlairExtractor,
     LanguageRegexExtractor,
     TitleExtractor,
-    CompositeExtractor
+    CompositeExtractor,
+    EntityRefiner
 )
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ def get_extractor(language: str, extractor_type: str = 'composite'):
     return None
 
 
-def extract_entities(text: str, language: str = None, method: str = None) -> List[Dict[str, Any]]:
+def extract_entities(text: str, language: str = None, method: str = None, refine: bool = None) -> List[Dict[str, Any]]:
     """
     Extract entities from text using the specified language and method.
     
@@ -75,6 +76,9 @@ def extract_entities(text: str, language: str = None, method: str = None) -> Lis
         language: Language of the text ('de', 'nl', 'en'). Defaults to DEFAULT_SETTINGS['language'].
         method: Extraction method ('composite', 'spacy', 'huggingface', 'flair', 'regex', 'title'). 
                 Defaults to DEFAULT_SETTINGS['method'].
+        refine: Whether to apply entity refinement to classify generic labels (DATE, LOCATION)
+                into specific types (publication_date, impact_location, etc.).
+                Defaults to DEFAULT_SETTINGS['enable_refinement'].
         
     Returns:
         List of entity dictionaries with keys: text, label, start, end
@@ -85,6 +89,8 @@ def extract_entities(text: str, language: str = None, method: str = None) -> Lis
         language = DEFAULT_SETTINGS['language']
     if method is None:
         method = DEFAULT_SETTINGS['method']
+    if refine is None:
+        refine = DEFAULT_SETTINGS['enable_refinement']
     
     # Get extractor (cached)
     extractor = get_extractor(language, method)
@@ -94,7 +100,15 @@ def extract_entities(text: str, language: str = None, method: str = None) -> Lis
         return []
     
     try:
-        return extractor.extract(text)
+        entities = extractor.extract(text)
+        
+        # Apply refinement if enabled
+        if refine and entities:
+            refiner = EntityRefiner()
+            entities = refiner.refine(entities, text)
+            logger.debug(f"Applied entity refinement to {len(entities)} entities")
+        
+        return entities
     except Exception as e:
         logger.warning(f"Entity extraction failed ({method}/{language}): {e}")
         return []
