@@ -102,6 +102,38 @@ class TranslationConfig(BaseModel):
         return v.strip().lower() if isinstance(v, str) else v
 
 
+class MLTrainingConfig(BaseModel):
+    """Machine Learning training configuration."""
+    
+    transformer: str = Field(
+        default="distilbert/distilbert-base-uncased",
+        description="Base transformer model for fine-tuning"
+    )
+    learning_rate: float = Field(
+        default=2e-5,
+        gt=0,
+        description="Learning rate for training"
+    )
+    epochs: int = Field(
+        default=2,
+        ge=1,
+        description="Number of training epochs"
+    )
+    weight_decay: float = Field(
+        default=0.01,
+        ge=0,
+        description="Weight decay for regularization"
+    )
+    huggingface_token: SecretStr | None = Field(
+        default=None,
+        description="HuggingFace API token for model upload"
+    )
+    huggingface_output_model_id: str | None = Field(
+        default=None,
+        description="Target model ID on HuggingFace Hub"
+    )
+
+
 class AppConfig(BaseModel):
     """Root application configuration model."""
     
@@ -125,6 +157,10 @@ class AppConfig(BaseModel):
     translation: TranslationConfig = Field(
         default_factory=TranslationConfig,
         description="Translation service configuration"
+    )
+    ml_training: MLTrainingConfig = Field(
+        default_factory=MLTrainingConfig,
+        description="Machine learning training configuration"
     )
 
 

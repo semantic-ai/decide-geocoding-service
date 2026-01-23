@@ -21,5 +21,13 @@
   "translation": {
     "target_language": "en",
     "provider": "huggingface"
+  },
+  "ml_training": {
+    "transformer": "distilbert/distilbert-base-uncased",
+    "learning_rate": 2e-5,
+    "epochs": 2,
+    "weight_decay": 0.01,
+    "huggingface_token": null,
+    "huggingface_output_model_id": null
   }
 }

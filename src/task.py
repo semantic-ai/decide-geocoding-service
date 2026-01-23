@@ -530,25 +530,19 @@ class ClassifierTrainingTask(Task, ABC):
                 "SDG-17 Partnerships for the Goals"
                 ]
         
-        kwargs = {}
-
-        if os.getenv("TRANSFORMER_NAME"):
-            kwargs["transformer"] = os.getenv("TRANSFORMER_NAME")
-
-        if os.getenv("LEARNING_RATE"):
-            kwargs["learning_rate"] = float(os.getenv("LEARNING_RATE"))
-
-        if os.getenv("EPOCHS"):
-            kwargs["epochs"] = int(os.getenv("EPOCHS"))
-
-        if os.getenv("WEIGHT_DECAY"):
-            kwargs["weight_decay"] = float(os.getenv("WEIGHT_DECAY"))
+        config = get_config()
+        ml_config = config.ml_training
 
         print("Started training...", flush=True)
-        train(decisions[:10],
-              sdgs, 
-              os.getenv("HUGGINGFACE_OUTPUT_MODEL_ID"),
-              **kwargs) 
+        train(
+            decisions[:10],
+            sdgs,
+            ml_config.huggingface_output_model_id,
+            transformer=ml_config.transformer,
+            learning_rate=ml_config.learning_rate,
+            epochs=ml_config.epochs,
+            weight_decay=ml_config.weight_decay,
+        )
         print("Done training!", flush=True)
 
     def convert_classes_to_original_names(self, decisions: list[dict[str, str | list[str]]]):

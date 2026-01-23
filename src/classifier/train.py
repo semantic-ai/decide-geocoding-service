@@ -1,10 +1,10 @@
-import os
 import git
 import fire
 from huggingface_hub import login
 from .data import get_dataset_cls
 from .metrics import get_metric_cls
 from .ld import build_airo_model_insert_query
+from ..config import get_config
 
 from helpers import query
 from transformers import AutoTokenizer, DataCollatorWithPadding, AutoModelForSequenceClassification, TrainingArguments, Trainer, pipeline
@@ -30,12 +30,13 @@ def train(
     else:
         problem_type = "single_label_classification"
 
-    token = os.getenv("HUGGINGFACE_TOKEN")
+    config = get_config()
+    token = config.ml_training.huggingface_token
     if not token:
         raise RuntimeError(
-            "No Hugginface token was provided in the environment variables!"
-        )    
-    login(token=token)
+            "No HuggingFace token configured in config.json (ml_training.huggingface_token)"
+        )
+    login(token=token.get_secret_value())
 
     # First load utility classes for data and metrics
     dataset = get_dataset_cls(problem_type)(decisions, labels)
