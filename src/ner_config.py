@@ -25,6 +25,25 @@ NER_MODELS = {
     'title_extraction': {
         'model': 'javdrher/decide-gemma3-270m',
         'max_new_tokens': 4000
+    },
+    'refinement': {
+        'model': 'svercoutere/longformer-classifier-refinement-abb',
+        'max_length': 2048,
+        # Labels that can be refined by the model
+        'refinable_labels': ['DATE', 'LOCATION', 'LOC', 'GPE'],
+        # Mapping from model output indices to refined labels
+        'label_classes': [
+            'context_date',
+            'context_location', 
+            'context_period',
+            'entry_date',
+            'expiry_date',
+            'impact_location',
+            'legal_date',
+            'publication_date',
+            'session_date',
+            'validity_period'
+        ]
     }
 }
 
@@ -84,3 +103,4 @@ LABEL_MAPPINGS = {
     'huggingface': {}, 
     'regex': {},
 }
+

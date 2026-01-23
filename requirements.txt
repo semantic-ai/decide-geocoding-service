@@ -7,8 +7,8 @@ openai
 -f https://download.pytorch.org/whl/cpu
 torch
 flair
-transformers==4.57.1
-tokenizers==0.22.1
+transformers
+tokenizers
 peft
 langdetect
 fire

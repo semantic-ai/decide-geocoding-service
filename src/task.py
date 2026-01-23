@@ -116,8 +116,16 @@ class Task(ABC):
     def run(self):
         """Context manager for task execution with state transitions."""
         self.change_state("scheduled", "busy")
-        yield
-        self.change_state("busy", "success")
+        try:
+            yield
+            self.change_state("busy", "success")
+        except Exception as e:
+            self.logger.error(f"Task {self.task_uri} failed: {type(e).__name__}: {str(e)}", exc_info=True)
+            try:
+                self.change_state("busy", "failed")
+            except Exception as state_error:
+                self.logger.error(f"Failed to update task {self.task_uri} status to failed: {state_error}")
+            raise
 
     def execute(self):
         """Run the task and handle state transitions."""
@@ -149,7 +157,10 @@ class DecisionTask(Task, ABC):
         }
         """).substitute(task=sparql_escape_uri(task_uri))
         r = query(q)
-        self.source = r["results"]["bindings"][0]["source"]["value"]
+        bindings = r.get("results", {}).get("bindings", [])
+        if not bindings or "source" not in bindings[0] or "value" not in bindings[0].get("source", {}):
+            raise ValueError(f"No source found for task {task_uri}")
+        self.source = bindings[0]["source"]["value"]
 
     def fetch_data(self) -> str:
         """Retrieve the input data for this task from the triplestore."""
@@ -244,10 +255,22 @@ class EntityExtractionTask(DecisionTask):
     __task_type__ = TASK_OPERATIONS["entity_extraction"]
 
     def create_language_relation(self, source_uri: str, language: str):
+        """
+        Create a language annotation for the source.
+        
+        Note: An alternative approach would be to use an "UNK" (unknown) token
+        for unsupported languages to preserve metadata that language detection
+        was attempted, rather than silently skipping the annotation.
+        """
+        lang_uri = LANGUAGE_CODE_TO_URI.get(language)
+        if not lang_uri:
+            error_msg = f"Unsupported language code '{language}' - cannot create language annotation"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
         TripletAnnotation(
             subject=self.source,
             predicate="eli:language",
-            obj=sparql_escape_uri(LANGUAGE_CODE_TO_URI.get(language)),
+            obj=sparql_escape_uri(lang_uri),
             activity_id=self.task_uri,
             source_uri=source_uri,
             start=None,
@@ -662,7 +685,9 @@ class TranslationTask(DecisionTask):
         
         result = query(query_string)
         bindings = result.get("results", {}).get("bindings", [])
-        language_uri = bindings[0]["language"]["value"] if bindings else None
+        language_uri = None
+        if bindings and "language" in bindings[0] and "value" in bindings[0].get("language", {}):
+            language_uri = bindings[0]["language"]["value"]
         
         if language_uri:
             lang_code = LANGUAGE_URI_TO_CODE.get(language_uri)
@@ -701,10 +726,15 @@ class TranslationTask(DecisionTask):
             translation_annotation_uri: URI of the translation annotation to annotate
             target_language: Target language code (must exist in LANGUAGE_CODE_TO_URI)
         """
+        lang_uri = LANGUAGE_CODE_TO_URI.get(target_language)
+        if not lang_uri:
+            error_msg = f"Unsupported target language '{target_language}' - cannot create language annotation"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
         TripletAnnotation(
             subject=translation_annotation_uri,
             predicate="eli:language",
-            obj=sparql_escape_uri(LANGUAGE_CODE_TO_URI[target_language]),
+            obj=sparql_escape_uri(lang_uri),
             activity_id=self.task_uri,
             source_uri=translation_annotation_uri,
             start=None,
@@ -740,11 +770,12 @@ class TranslationTask(DecisionTask):
         
         # Normalize language code (lowercase) and verify it exists in our mapping
         normalized_lang = target_language.lower()
-        if normalized_lang in LANGUAGE_CODE_TO_URI:
-            # Create language annotation that targets the translation annotation itself
-            self.create_target_language_relation(translation_annotation_uri, normalized_lang)
-        else:
-            self.logger.warning(f"Language code '{target_language}' not found in LANGUAGE_CODE_TO_URI mapping, skipping language annotation")
+        if normalized_lang not in LANGUAGE_CODE_TO_URI:
+            error_msg = f"Unsupported target language '{target_language}' - cannot create language annotation"
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
+        # Create language annotation that targets the translation annotation itself
+        self.create_target_language_relation(translation_annotation_uri, normalized_lang)
         
         self.logger.info(f"Stored translation text as annotation (language: {target_language})")
     

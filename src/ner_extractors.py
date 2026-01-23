@@ -18,6 +18,7 @@ from typing import List, Dict, Any
 from .ner_models import model_manager
 from .ner_config import REGEX_PATTERNS, TITLE_EXTRACTION_INSTRUCTION, NER_MODELS, LABEL_MAPPINGS
 from .config import get_config
+import torch
 
 
 # ============================================================================
@@ -475,3 +476,109 @@ def create_english_composite_extractor() -> CompositeExtractor:
         HuggingFaceExtractor('en'),
         LanguageRegexExtractor('en')  # Will be empty unless patterns are added
     ])
+
+class EntityRefiner:
+    """
+    Refines generic entity labels to specific types using a Longformer classifier.
+    
+    This is a standalone post-processing step that can be applied after any NER extraction.
+    It refines labels like DATE -> publication_date, LOCATION -> impact_location, etc.
+    
+    Usage:
+        extractor = create_german_composite_extractor()
+        entities = extractor.extract(text)
+        
+        refiner = EntityRefiner()
+        refined_entities = refiner.refine(entities, text)
+    """
+    
+    def __init__(self):
+        self.model = None
+        self.tokenizer = None
+        self.logger = logging.getLogger(__name__)
+    
+    def _load_model(self):
+        """Lazy load the refinement model."""
+        if self.model is None:
+            self.model, self.tokenizer = model_manager.get_refinement_model()
+    
+    def refine(self, entities: List[Dict[str, Any]], text: str) -> List[Dict[str, Any]]:
+        """
+        Refine generic entity labels to specific types.
+        
+        Args:
+            entities: List of entity dictionaries from NER extraction
+            text: The original text (needed for context)
+            
+        Returns:
+            List of entities with refined labels. Non-refinable entities are passed through unchanged.
+            Refined entities have 'original_label' field preserving the generic label.
+        """
+        self._load_model()
+        
+        if self.model is None or self.tokenizer is None:
+            self.logger.warning("Refinement model not available, returning entities unchanged")
+            return entities
+        
+        refinement_config = NER_MODELS.get('refinement', {})
+        refinable_labels = set(refinement_config.get('refinable_labels', []))
+        label_classes = refinement_config.get('label_classes', [])
+        max_length = refinement_config.get('max_length', 2048)
+        
+        refined_entities = []
+        for entity in entities:
+            # Only refine entities with refinable labels
+            if entity['label'] not in refinable_labels:
+                refined_entities.append(entity)
+                continue
+            
+            try:
+                # Mark entity in context with [E] ... [/E] markers as per model documentation
+                entity_text = entity['text']
+                start_pos = entity['start']
+                end_pos = entity['end']
+                
+                # Create marked text with entity markers
+                marked_text = (
+                    text[:start_pos] + 
+                    f"[E] {entity_text} [/E]" + 
+                    text[end_pos:]
+                )
+                
+                # Tokenize and predict
+                inputs = self.tokenizer(
+                    marked_text, 
+                    return_tensors="pt", 
+                    truncation=True, 
+                    max_length=max_length, 
+                    padding="max_length"
+                )
+                
+                with torch.no_grad():
+                    outputs = self.model(**inputs)
+                
+                # Get predicted class
+                pred_idx = torch.argmax(outputs.logits, dim=-1).item()
+                
+                # Map prediction to label
+                if pred_idx < len(label_classes):
+                    refined_label = label_classes[pred_idx].upper()
+                    
+                    # Create refined entity (preserve original label)
+                    refined_entity = dict(entity)
+                    refined_entity['original_label'] = entity['label']
+                    refined_entity['label'] = refined_label
+                    refined_entities.append(refined_entity)
+                else:
+                    # If prediction is out of range, keep original
+                    refined_entities.append(entity)
+                    
+            except Exception as e:
+                self.logger.warning(f"Error refining entity '{entity['text']}': {e}")
+                refined_entities.append(entity)
+        
+        return refined_entities
+
+
+# Singleton instance for convenience
+entity_refiner = EntityRefiner()
