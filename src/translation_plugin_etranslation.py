@@ -1,62 +1,24 @@
 """European Commission eTranslation plugin for translatepy."""
 
-import os
 import re
-import json
 import time
 import logging
 import requests
 import threading
-from dataclasses import dataclass
-from typing import Optional, Dict, Tuple
+from typing import Dict, Tuple
 
 from requests.auth import HTTPBasicAuth
 from translatepy.language import Language
 from translatepy.translators.base import BaseTranslator
 from translatepy.models import TranslationResult
 
+from .config import get_config
+
 
 # Global callback storage and server for eTranslation callbacks
 # Key: (requestId, targetLanguage) -> callback payload
 _callback_storage: Dict[Tuple[int, str], Dict] = {}
 _callback_lock = threading.Lock()
-
-
-@dataclass
-class Config:
-    """Centralized configuration from environment variables."""
-    base_url: str
-    bearer_token: Optional[str]
-    username: Optional[str]
-    password: Optional[str]
-    domain: str
-    timeout_seconds: float
-    callback_wait_timeout: float
-    max_text_length: int
-    callback_url: Optional[str]
-    callback_url_host: Optional[str]
-    
-    @classmethod
-    def from_env(cls) -> 'Config':
-        """Read all configuration from environment variables."""
-        callback_url_env = os.getenv("ETRANSLATION_CALLBACK_URL")
-        if callback_url_env:
-            callback_url_env = callback_url_env.rstrip('/')
-            if callback_url_env.endswith('/callback'):
-                callback_url_env = callback_url_env[:-8]
-        
-        return cls(
-            base_url=os.getenv("ETRANSLATION_BASE_URL", "https://language-tools.ec.europa.eu/etranslation/api"),
-            bearer_token=os.getenv("ETRANSLATION_BEARER_TOKEN"),
-            username=os.getenv("ETRANSLATION_USERNAME"),
-            password=os.getenv("ETRANSLATION_PASSWORD"),
-            domain=os.getenv("ETRANSLATION_DOMAIN", "GEN"),
-            timeout_seconds=float(os.getenv("ETRANSLATION_TIMEOUT", "60")),
-            callback_wait_timeout=float(os.getenv("ETRANSLATION_CALLBACK_TIMEOUT", "600")),
-            max_text_length=int(os.getenv("ETRANSLATION_MAX_TEXT_LENGTH", "4000")),
-            callback_url=callback_url_env,
-            callback_url_host=os.getenv("ETRANSLATION_CALLBACK_URL_HOST"),
-        )
 
 
 class ETRanslationService(BaseTranslator):
@@ -67,11 +29,12 @@ class ETRanslationService(BaseTranslator):
             super().__init__(**kwargs)
 
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.config = Config.from_env()
+        app_config = get_config()
+        self.config = app_config.translation.etranslation
         
         # Validate authentication
         if not self.config.bearer_token and not (self.config.username and self.config.password):
-            self.logger.warning("ETRANSLATION_BEARER_TOKEN or (ETRANSLATION_USERNAME/ETRANSLATION_PASSWORD) not set")
+            self.logger.warning("eTranslation credentials not configured in config.json (translation.etranslation)")
         
         # Setup callback base URL (must be publicly reachable by eTranslation)
         self.callback_base_url = self._setup_callback_url()
@@ -80,7 +43,7 @@ class ETRanslationService(BaseTranslator):
         if "localhost" in self.callback_base_url or "127.0.0.1" in self.callback_base_url:
             raise RuntimeError(
                 f"Callback URL is localhost: {self.callback_base_url}. "
-                f"eTranslation cannot reach localhost. Set ETRANSLATION_CALLBACK_URL to a public URL."
+                f"eTranslation cannot reach localhost. Set translation.etranslation.callback_url to a public URL in config.json."
             )
 
     def _setup_callback_url(self) -> str:
@@ -91,25 +54,21 @@ class ETRanslationService(BaseTranslator):
         the official REST v2 documentation:
         https://language-tools.ec.europa.eu/dev-corner/etranslation/rest-v2/text
         """
-        if self.config.callback_url:
-            self.logger.info(f"Using callback URL: {self.config.callback_url}")
-            return self.config.callback_url
+        callback_url = self.config.callback_url
+        if not callback_url:
+            raise RuntimeError(
+                "No public callback URL configured. "
+                "Set translation.etranslation.callback_url in config.json "
+                "(e.g., https://your-host/etranslation)"
+            )
         
-        # Fallback to callback_url_host
-        if (
-            self.config.callback_url_host
-            and self.config.callback_url_host not in {"localhost", "127.0.0.1"}
-        ):
-            # Assume the host already maps to the correct HTTP(S) endpoint.
-            url = f"http://{self.config.callback_url_host}"
-            self.logger.warning(f"Using callback URL host: {url}")
-            return url
+        # Normalize the callback URL
+        callback_url = callback_url.rstrip('/')
+        if callback_url.endswith('/callback'):
+            callback_url = callback_url[:-9]
         
-        raise RuntimeError(
-            "No public callback URL available. Options:\n"
-            "  1. Set ETRANSLATION_CALLBACK_URL to your public URL\n"
-            "  2. Set ETRANSLATION_CALLBACK_URL_HOST to your public IP/hostname"
-        )
+        self.logger.info(f"Using callback URL: {callback_url}")
+        return callback_url
 
     def _get_lang_code(self, language) -> str:
         """Convert language to ISO 639-1 code string."""
@@ -222,9 +181,10 @@ class ETRanslationService(BaseTranslator):
         
         auth = None
         if self.config.bearer_token:
-            headers["Authorization"] = f"Bearer {self.config.bearer_token}"
+            headers["Authorization"] = f"Bearer {self.config.bearer_token.get_secret_value()}"
         else:
-            auth = HTTPBasicAuth(self.config.username, self.config.password)
+            password = self.config.password.get_secret_value() if self.config.password else None
+            auth = HTTPBasicAuth(self.config.username, password)
 
         callback_url = f"{self.callback_base_url}/callback"
         payload = {
@@ -330,7 +290,7 @@ class ETRanslationService(BaseTranslator):
         """Translate text using eTranslation REST v2 API."""
         if not self.config.bearer_token and not (self.config.username and self.config.password):
             raise ValueError(
-                "ETRANSLATION_BEARER_TOKEN or (ETRANSLATION_USERNAME/ETRANSLATION_PASSWORD) must be set"
+                "eTranslation credentials not configured. Set either bearer_token or username/password in config.json (translation.etranslation)"
             )
         
         dest_lang = self._get_lang_code(destination_language)

@@ -83,6 +83,50 @@ class LlmConfig(BaseModel):
     )
 
 
+class ETranslationConfig(BaseModel):
+    """eTranslation service configuration."""
+    
+    base_url: AnyHttpUrl = Field(
+        default="https://language-tools.ec.europa.eu/etranslation/api",
+        description="eTranslation API base URL"
+    )
+    bearer_token: SecretStr | None = Field(
+        default=None,
+        description="Bearer token for eTranslation API authentication"
+    )
+    username: str | None = Field(
+        default=None,
+        description="Username for eTranslation API basic authentication"
+    )
+    password: SecretStr | None = Field(
+        default=None,
+        description="Password for eTranslation API basic authentication"
+    )
+    domain: str = Field(
+        default="GEN",
+        description="Translation domain (e.g., GEN for general)"
+    )
+    timeout_seconds: float = Field(
+        default=60.0,
+        ge=1.0,
+        description="HTTP request timeout in seconds"
+    )
+    callback_wait_timeout: float = Field(
+        default=600.0,
+        ge=1.0,
+        description="Maximum time to wait for translation callback in seconds"
+    )
+    max_text_length: int = Field(
+        default=4000,
+        ge=100,
+        description="Maximum text length per translation request"
+    )
+    callback_url: str | None = Field(
+        default=None,
+        description="Public callback URL for eTranslation to send results (e.g., https://your-host/etranslation)"
+    )
+
+
 class TranslationConfig(BaseModel):
     """Translation service configuration."""
     
@@ -93,6 +137,10 @@ class TranslationConfig(BaseModel):
     provider: Literal["huggingface", "etranslation", "gemma", "auto", "google", "microsoft", "deepl", "libre"] = Field(
         default="huggingface",
         description="Translation provider to use"
+    )
+    etranslation: ETranslationConfig = Field(
+        default_factory=ETranslationConfig,
+        description="eTranslation-specific settings"
     )
     
     @field_validator('provider', mode='before')

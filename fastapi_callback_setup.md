@@ -9,7 +9,7 @@ The callbacks are handled by the main FastAPI app instead of a standalone HTTP s
 ### 1. Callback flow overview
 
 - The service sends translation requests to:
-  - `ETRANSLATION_BASE_URL + "/askTranslate"`  
+  - `translation.etranslation.base_url + "/askTranslate"`  
     (by default `https://language-tools.ec.europa.eu/etranslation/api/askTranslate`)
 - Each request includes (see `src/translation_plugin_etranslation.py`):
   - `textToTranslate`
@@ -19,10 +19,10 @@ The callbacks are handled by the main FastAPI app instead of a standalone HTTP s
   - `notifications.success.http`, `notifications.failure.http`
   - `deliveries.http`
 - All three callback URLs point to:
-  - `f"{ETRANSLATION_CALLBACK_URL}/callback"`
+  - `f"{translation.etranslation.callback_url}/callback"`
 - The FastAPI route that receives these callbacks is:
   - `POST /etranslation/callback` in `web.py`
-- Therefore, **ETRANSLATION_CALLBACK_URL must be the public base URL** of:
+- Therefore, **`callback_url` must be the public base URL** of:
   - `https://your-host-or-domain/etranslation`
 
 eTranslation will POST JSON payloads (success, error, delivery) to  
@@ -30,7 +30,41 @@ eTranslation will POST JSON payloads (success, error, delivery) to
 
 ---
 
-### 2. Server requirements
+### 2. Configuration
+
+All eTranslation settings are configured in `config.json` under `translation.etranslation`:
+
+```json
+{
+  "translation": {
+    "target_language": "en",
+    "provider": "etranslation",
+    "etranslation": {
+      "base_url": "https://language-tools.ec.europa.eu/etranslation/api",
+      "bearer_token": null,
+      "username": "your-username",
+      "password": "your-password",
+      "domain": "GEN",
+      "timeout_seconds": 60,
+      "callback_wait_timeout": 180,
+      "max_text_length": 4000,
+      "callback_url": "https://your-host-or-domain/etranslation"
+    }
+  }
+}
+```
+
+**Authentication options** (choose one):
+- **Bearer token**: Set `bearer_token` to your token
+- **Basic auth**: Set `username` and `password`
+
+> Note: `callback_url` **must not** contain `/callback` or `localhost`.  
+> The code will append `/callback` and will reject pure localhost as eTranslation
+> cannot reach it from the EU infrastructure.
+
+---
+
+### 3. Server requirements
 
 Run this on a server where you can:
 
@@ -38,7 +72,7 @@ Run this on a server where you can:
 - Control firewall rules (allow inbound traffic)
 - Optionally have a DNS name pointing to the server (recommended)
 
-You can use the existing `docker-compose.yaml` with `geocoding-service` as a base:
+The `docker-compose.yaml` mounts `config.json` as read-only:
 
 ```yaml
 services:
@@ -47,34 +81,13 @@ services:
       context: .
     ports:
       - "8082:80"       # default in this repo; change to "80:80" on a public server
-    environment:
-      MODE: "development"
-      LOG_LEVEL: "debug"
-      MU_SPARQL_ENDPOINT: http://app-decide-virtuoso-1:8890/sparql
-      NOMINATIM_BASE_URL: http://nominatim:8080
-      TRANSLATION_PROVIDER: "etranslation"
-      # eTranslation auth (choose ONE method)
-      # Option A: bearer token
-      # ETRANSLATION_BEARER_TOKEN: "YOUR_BEARER_TOKEN"
-      # or:
-      ETRANSLATION_USERNAME: "your-username"
-      ETRANSLATION_PASSWORD: "your-password"
-      ETRANSLATION_BASE_URL: "https://language-tools.ec.europa.eu/etranslation/api"
-      ETRANSLATION_DOMAIN: "GEN"
-      ETRANSLATION_TIMEOUT: "60"
-      ETRANSLATION_CALLBACK_TIMEOUT: "180"
-      # IMPORTANT: base URL of /etranslation (NO trailing /callback)
-      # leave empty for local dev; set on a real server, e.g.:
-      # ETRANSLATION_CALLBACK_URL: "https://your-host-or-domain/etranslation"
+    volumes:
+      - ./config.json:/app/config.json:ro  # Mount config as read-only
 ```
-
-> Note: `ETRANSLATION_CALLBACK_URL` **must not** contain `/callback` or `localhost`.  
-> The code will append `/callback` and will reject pure localhost as eTranslation
-> cannot reach it from the EU infrastructure.
 
 ---
 
-### 3. Network and firewall configuration
+### 4. Network and firewall configuration
 
 On the server:
 
@@ -86,10 +99,10 @@ On the server:
 2. **DNS (recommended)**
    - Point a DNS record to the server IP, e.g.:
      - `A geocoding.example.com -> 203.0.113.10`
-   - Then set:
-     - `ETRANSLATION_CALLBACK_URL="https://geocoding.example.com/etranslation"`
+   - Then set in `config.json`:
+     - `"callback_url": "https://geocoding.example.com/etranslation"`
    - Or for plain HTTP testing:
-     - `ETRANSLATION_CALLBACK_URL="http://geocoding.example.com/etranslation"`
+     - `"callback_url": "http://geocoding.example.com/etranslation"`
 
 HTTPS is strongly recommended in production and aligns with the examples in the
 official docs, but the code will work over HTTP as well if your environment
@@ -97,7 +110,7 @@ allows it.
 
 ---
 
-### 4. FastAPI callback contract
+### 5. FastAPI callback contract
 
 The FastAPI route in `web.py`:
 
@@ -111,15 +124,15 @@ The FastAPI route in `web.py`:
 
 This matches the behaviour expected by the eTranslation backend:
 callbacks are acknowledged with HTTP 200, and any errors/timeouts are handled
-on the client side by waiting for the callback up to `ETRANSLATION_CALLBACK_TIMEOUT`.
+on the client side by waiting for the callback up to `callback_wait_timeout`.
 
 ---
 
-### 5. How to test on a real server
+### 6. How to test on a real server
 
 1. **Deploy**
    - Copy the repo to the server.
-   - Set the environment variables (especially the eTranslation credentials and `ETRANSLATION_CALLBACK_URL`).
+   - Edit `config.json` with your eTranslation credentials and `callback_url`.
    - Run:
      ```bash
      docker-compose up --build -d
@@ -152,5 +165,4 @@ on the client side by waiting for the callback up to `ETRANSLATION_CALLBACK_TIME
 
 If all of the above steps work, the setup is ready for others to use on any
 server with a public IP and proper firewall configuration, without any tunneling
-services. 
-
+services.

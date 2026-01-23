@@ -20,7 +20,18 @@
   },
   "translation": {
     "target_language": "en",
-    "provider": "huggingface"
+    "provider": "huggingface",
+    "etranslation": {
+      "base_url": "https://language-tools.ec.europa.eu/etranslation/api",
+      "bearer_token": null,
+      "username": null,
+      "password": null,
+      "domain": "GEN",
+      "timeout_seconds": 60,
+      "callback_wait_timeout": 180,
+      "max_text_length": 4000,
+      "callback_url": null
+    }
   },
   "ml_training": {
     "transformer": "distilbert/distilbert-base-uncased",
