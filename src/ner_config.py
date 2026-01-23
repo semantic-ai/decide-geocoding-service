@@ -5,8 +5,6 @@ This module contains all configuration settings, model names, and constants
 used by the NER extraction system.
 """
 
-import os
-
 # Model Configuration
 NER_MODELS = {
     'spacy': {
@@ -104,11 +102,4 @@ LABEL_MAPPINGS = {
     },
     'huggingface': {}, 
     'regex': {},
-}
-
-DEFAULT_SETTINGS = {
-    'language': os.getenv('NER_DEFAULT_LANGUAGE', 'nl'),
-    'method': os.getenv('NER_DEFAULT_METHOD', 'composite'),
-    'post_process': os.getenv('NER_POST_PROCESS', 'true').lower() == 'true',
-    'enable_refinement': os.getenv('NER_ENABLE_REFINEMENT', 'true').lower() == 'true',
 }

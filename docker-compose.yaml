@@ -21,16 +21,7 @@ services:
     networks:
       - app-decide_default
     environment:
-      MODE: "development"
-      LOG_LEVEL: "debug"
       MU_SPARQL_ENDPOINT: http://app-decide-virtuoso-1:8890/sparql
-      NOMINATIM_BASE_URL: http://nominatim:8080
-      NER_LABELS: '["CITY", "DOMAIN", "HOUSENUMBERS", "INTERSECTION", "POSTCODE", "PROVINCE", "ROAD", "STREET"]'
-      OPENAI_API_KEY: 'sk-SECRET-PART'
-      LLM_MODEL_NAME: 'gpt-4o-mini'
-      LLM_TEMPERATURE: 0.1
-      TRANSLATION_TARGET_LANG: 'en'
-      TRANSLATION_PROVIDER: 'etranslation'
       ETRANSLATION_USERNAME: ''
       ETRANSLATION_PASSWORD: ''
       ETRANSLATION_BASE_URL: 'https://language-tools.ec.europa.eu/etranslation/api'
@@ -42,6 +33,7 @@ services:
       EXPECTED_TASK_OBJECT: 'http://redpencil.data.gift/id/concept/JobStatus/scheduled'
     volumes:
       - ./:/app
+      - ./config.json:/app/config.json:ro  # Mount config as read-only
 
 networks:
   app-decide_default:

@@ -9,7 +9,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from functools import cache
 
-from .ner_config import DEFAULT_SETTINGS
+from .config import get_config
 from .ner_extractors import (
     create_german_composite_extractor,
     create_dutch_composite_extractor,
@@ -73,9 +73,9 @@ def extract_entities(text: str, language: str = None, method: str = None, refine
     
     Args:
         text: Input text to process
-        language: Language of the text ('de', 'nl', 'en'). Defaults to DEFAULT_SETTINGS['language'].
+        language: Language of the text ('de', 'nl', 'en'). Defaults to config.ner.language.
         method: Extraction method ('composite', 'spacy', 'huggingface', 'flair', 'regex', 'title'). 
-                Defaults to DEFAULT_SETTINGS['method'].
+                Defaults to config.ner.method.
         refine: Whether to apply entity refinement to classify generic labels (DATE, LOCATION)
                 into specific types (publication_date, impact_location, etc.).
                 Defaults to DEFAULT_SETTINGS['enable_refinement'].
@@ -85,12 +85,13 @@ def extract_entities(text: str, language: str = None, method: str = None, refine
         Returns empty list if extraction fails or method/language is unsupported.
     """
     # Use defaults from config if not provided
+    config = get_config()
     if language is None:
-        language = DEFAULT_SETTINGS['language']
+        language = config.ner.language
     if method is None:
-        method = DEFAULT_SETTINGS['method']
+        method = config.ner.method
     if refine is None:
-        refine = DEFAULT_SETTINGS['enable_refinement']
+        refine = config.ner.enable_refinement
     
     # Get extractor (cached)
     extractor = get_extractor(language, method)

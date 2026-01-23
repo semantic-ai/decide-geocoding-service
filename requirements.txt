@@ -15,7 +15,9 @@ fire
 datasets
 rdflib
 gitpython
+pytz
 fastapi
+pydantic>=2.0.0
 SPARQLWrapper
 translatepy
 #tokenizers==0.22.1
