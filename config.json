@@ -7,7 +7,8 @@
     "language": "nl",
     "method": "composite",
     "post_process": true,
-    "labels": ["CITY", "DOMAIN", "HOUSENUMBERS", "INTERSECTION", "POSTCODE", "PROVINCE", "ROAD", "STREET"]
+    "labels": ["CITY", "DOMAIN", "HOUSENUMBERS", "INTERSECTION", "POSTCODE", "PROVINCE", "ROAD", "STREET"],
+    "enable_refinement": true
   },
   "geocoding": {
     "nominatim_base_url": "http://nominatim:8080"

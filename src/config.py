@@ -31,6 +31,10 @@ class NerConfig(BaseModel):
         default_factory=lambda: ["CITY", "DOMAIN", "HOUSENUMBERS", "INTERSECTION", "POSTCODE", "PROVINCE", "ROAD", "STREET"],
         description="List of NER labels to extract"
     )
+    enable_refinement: bool = Field(
+        default=True,
+        description="Whether to apply entity refinement to classify generic labels (DATE, LOCATION) into specific types"
+    )
 
 
 class AppSettingsConfig(BaseModel):
