@@ -10,8 +10,11 @@ from src.helper_functions import process_text, geocode_detectable
 from src.nominatim_geocoder import NominatimGeocoder
 from src.annotation import GeoAnnotation, NERAnnotation
 from src.sparql_config import AI_COMPONENTS, AGENT_TYPES
+from src.config import get_config
 import os
-import json
+
+# Load configuration
+config = get_config()
 
 print("=" * 80)
 print("SYSTEM VERIFICATION")
@@ -20,8 +23,7 @@ print("=" * 80)
 # Test 1: Belgian Location Extraction
 print("\n[1] Belgian Location Extraction (SpacyGeoAnalyzer)")
 model_path = os.getenv("NER_MODEL_PATH")
-labels = json.loads(os.getenv("NER_LABELS"))
-analyzer = SpacyGeoAnalyzer(model_path=model_path, labels=labels)
+analyzer = SpacyGeoAnalyzer(model_path=model_path, labels=config.ner.labels)
 
 belgian_text = "De Korenmarkt 15 in Gent is een belangrijk adres."
 doc = analyzer.extract_entities(belgian_text)
@@ -41,7 +43,7 @@ for entity in entities:
 
 # Test 3: Geocoding
 print("\n[3] Geocoding Belgian Locations")
-geocoder = NominatimGeocoder(base_url=os.getenv("NOMINATIM_BASE_URL"), rate_limit=0.5)
+geocoder = NominatimGeocoder(base_url=str(config.geocoding.nominatim_base_url), rate_limit=0.5)
 detectables, _, _ = process_text(belgian_text, analyzer, from_city="Gent")
 if detectables.get('streets'):
     result = geocode_detectable(detectables['streets'][0], geocoder)
@@ -89,14 +91,18 @@ for lang, text in [('dutch', "Jan in Brussel"), ('german', "Berlin in Deutschlan
 
 # Test 6: Configuration
 print("\n[6] Configuration Status")
-configs = {
+# Environment variables (not yet in config.json)
+env_configs = {
     "NER_MODEL_PATH": os.getenv("NER_MODEL_PATH"),
-    "NOMINATIM_BASE_URL": os.getenv("NOMINATIM_BASE_URL"),
     "MU_SPARQL_ENDPOINT": os.getenv("MU_SPARQL_ENDPOINT"),
 }
-for key, value in configs.items():
+for key, value in env_configs.items():
     status = "✓" if value else "✗"
     print(f"   {status} {key}: {'SET' if value else 'NOT SET'}")
+
+# Config.json values
+print(f"   ✓ nominatim_base_url: {config.geocoding.nominatim_base_url}")
+print(f"   ✓ ner.labels: {config.ner.labels}")
 
 print("\n" + "=" * 80)
 print("VERIFICATION COMPLETE - All systems operational!")
