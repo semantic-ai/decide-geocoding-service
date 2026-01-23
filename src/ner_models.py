@@ -10,7 +10,7 @@ from typing import Dict, Any
 from transformers import pipeline
 from .ner_config import NER_MODELS
 from flair.models import SequenceTagger
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForSequenceClassification
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +163,44 @@ class ModelManager:
         
         return self._models[model_key]
     
+    
+    def get_refinement_model(self):
+        """
+        Load and cache the entity refinement model (Longformer classifier).
+        
+        This model refines generic entity labels (DATE, LOCATION) into more 
+        specific types (publication_date, impact_location, etc.).
+        
+        Returns:
+            Tuple of (model, tokenizer) for the refinement classifier
+            
+        Raises:
+            Exception: If model cannot be loaded
+        """
+        model_key = "refinement_model"
+        tokenizer_key = "refinement_tokenizer"
+        
+        if model_key not in self._models:
+            try:
+                model_name = NER_MODELS['refinement']['model']
+                
+                logger.info(f"Loading entity refinement model: {model_name}")
+                
+                # Load tokenizer with special entity markers
+                tokenizer = AutoTokenizer.from_pretrained(model_name)
+                
+                # Load the sequence classification model
+                model = AutoModelForSequenceClassification.from_pretrained(model_name)
+                
+                self._models[model_key] = model
+                self._models[tokenizer_key] = tokenizer
+                
+                logger.info(f"Successfully loaded entity refinement model")
+            except Exception as e:
+                logger.warning(f"Entity refinement model could not be loaded: {e}")
+                return None, None
+        
+        return self._models[model_key], self._models[tokenizer_key]
     
     def clear_cache(self):
         """Clear all cached models to free memory."""
