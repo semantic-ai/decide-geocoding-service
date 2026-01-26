@@ -10,6 +10,8 @@ flair
 transformers
 tokenizers
 peft
+accelerate
+bitsandbytes
 langdetect
 fire
 datasets

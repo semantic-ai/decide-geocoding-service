@@ -5,6 +5,7 @@ import importlib
 import json
 import langdetect
 import random
+import re
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Type
 
@@ -24,6 +25,7 @@ from .sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OP
 from .llm_models.llm_model_clients import OpenAIModel
 from .llm_models.llm_task_models import LlmTaskInput, EntityLinkingTaskOutput
 from .classifier.train import train
+from transformers import pipeline as transformers_pipeline
 
 
 
@@ -834,3 +836,265 @@ class TranslationTask(DecisionTask):
         )
         
         self.logger.info(f"Translation stored as annotation")
+
+
+class SegmentationTask(DecisionTask):
+    """Task that segments public decision text into structural components."""
+    
+    __task_type__ = TASK_OPERATIONS["segmentation"]
+    
+    # Class-level lazy-loaded model (same pattern as GeoExtractionTask)
+    _generator = None
+    _TAG_RE = re.compile(r"</?([A-Za-z0-9_]+)>")
+    
+    SYSTEM_INSTRUCTION = """Your task is to segment the given text by inserting XML-style boundary tags. For each requested segment type, you must wrap the corresponding part of the text with a start tag <SEGMENT_NAME> and an end tag </SEGMENT_NAME>.
+
+Rules:
+- Do not modify or alter any text from the decision.
+- Insert the tags directly into the original text at the correct boundaries.
+- If a segment is not present in the text, do not add tags for that segment.
+- For the segment 'ARTICLE', each article must be wrapped separately using <ARTICLE>...</ARTICLE>, one article per tag pair.
+- Only use segment names from the provided list. Do not invent or use any other segment names.
+- The output must contain the original text with the correct tags inserted.
+
+SEGMENTS:
+```
+['TITLE', 'PARTICIPANTS', 'MOTIVATION', 'PREVIOUS_DECISIONS', 'LEGAL_FRAMEWORK', 'DECISION', 'VOTING', 'ARTICLE']
+```"""
+    
+    def get_generator(self):
+        """Lazy-load the segmentation model using config settings."""
+        if self.__class__._generator is None:
+            seg_config = get_config().segmentation
+            self.logger.info(f"Loading segmentation model: {seg_config.model_name}")
+            
+            # Simple loading like in the notebooks
+            self.__class__._generator = transformers_pipeline(
+                "text-generation",
+                model=seg_config.model_name,
+            )
+            self.logger.info(f"Loaded segmentation model: {seg_config.model_name}")
+        return self.__class__._generator
+    
+    def _rstrip_with_tail(self, s: str) -> tuple[str, str]:
+        """Return (head_without_trailing_ws, trailing_ws)."""
+        m = re.search(r"\s*\Z", s)
+        if not m:
+            return s, ""
+        return s[:m.start()], s[m.start():]
+
+    def _lstrip_with_head(self, s: str) -> tuple[str, str]:
+        """Return (leading_ws, tail_without_leading_ws)."""
+        m = re.match(r"\A\s*", s)
+        if not m:
+            return "", s
+        return s[:m.end()], s[m.end():]
+
+    def fix_missing_tags(self, text: str, separator: str = "\n\n") -> str:
+        """
+        Repairs missing begin/end tags and formats inserted tags naturally.
+
+        - Missing end tags (open tag still on stack when a new <TAG> starts):
+            Close the open tag *right before* the new opening tag, but after trimming
+            trailing whitespace from the closed segment.
+        - Missing begin tags (stray </TAG>):
+            Insert <TAG> so that leading whitespace stays outside the new tag.
+        - Mismatched closing tags:
+            Close intervening tags right before the encountered close tag.
+        """
+        stack: list[str] = []
+        out: list[str] = []
+
+        pos = 0
+        for m in self._TAG_RE.finditer(text):
+            chunk = text[pos:m.start()]
+            tag = m.group(0)
+            name = m.group(1)
+            is_closing = tag.startswith("</")
+
+            if not is_closing:
+                # OPENING TAG
+                if stack:
+                    head, tail_ws = self._rstrip_with_tail(chunk)
+                    out.append(head)
+                    while stack:
+                        out.append(f"</{stack.pop()}>")
+                    if tail_ws:
+                        out.append(tail_ws)
+                    out.append(tag)
+                else:
+                    out.append(chunk)
+                    out.append(tag)
+                stack.append(name)
+            else:
+                # CLOSING TAG
+                if stack and stack[-1] == name:
+                    out.append(chunk)
+                    out.append(tag)
+                    stack.pop()
+                elif name not in stack:
+                    lead_ws, body = self._lstrip_with_head(chunk)
+                    out.append(lead_ws)
+                    out.append(f"<{name}>")
+                    out.append(body)
+                    out.append(tag)
+                else:
+                    head, tail_ws = self._rstrip_with_tail(chunk)
+                    out.append(head)
+                    while stack and stack[-1] != name:
+                        out.append(f"</{stack.pop()}>")
+                    out.append(tag)
+                    stack.pop()
+                    out.append(tail_ws)
+            pos = m.end()
+
+        out.append(text[pos:])
+
+        if stack:
+            all_tail = out.pop()
+            head, tail_ws = self._rstrip_with_tail(all_tail)
+            out.append(head)
+            while stack:
+                out.append(f"</{stack.pop()}>")
+            out.append(tail_ws)
+
+        return "".join(out)
+
+    def extract_entities_ner_style(self, tagged_text: str) -> tuple[str, list[dict[str, Any]]]:
+        """
+        Extract NER-style entities from XML-tagged text.
+        
+        Returns:
+            Tuple of (clean_text, entities) where:
+            - clean_text: The text with all XML tags removed
+            - entities: List of dicts with keys: start, end, label, text
+            
+        The start/end positions are relative to the clean_text (without tags).
+        """
+        TAG_PATTERN = re.compile(r"<(/?)([A-Za-z0-9_]+)>")
+        
+        entities = []
+        clean_parts = []
+        clean_pos = 0
+        
+        # Stack to track open tags: [(tag_name, start_pos_in_clean_text), ...]
+        open_tags: list[tuple[str, int]] = []
+        
+        last_end = 0
+        for match in TAG_PATTERN.finditer(tagged_text):
+            # Add text before this tag to clean output
+            text_before = tagged_text[last_end:match.start()]
+            clean_parts.append(text_before)
+            clean_pos += len(text_before)
+            
+            is_closing = match.group(1) == "/"
+            tag_name = match.group(2)
+            
+            if not is_closing:
+                # Opening tag - record start position
+                open_tags.append((tag_name, clean_pos))
+            else:
+                # Closing tag - find matching open tag and create entity
+                for i in range(len(open_tags) - 1, -1, -1):
+                    if open_tags[i][0] == tag_name:
+                        start_pos = open_tags[i][1]
+                        entities.append({
+                            "start": start_pos,
+                            "end": clean_pos,
+                            "label": tag_name,
+                            "_temp_end": clean_pos
+                        })
+                        open_tags.pop(i)
+                        break
+            
+            last_end = match.end()
+        
+        # Add remaining text after last tag
+        clean_parts.append(tagged_text[last_end:])
+        clean_text = "".join(clean_parts)
+        
+        # Populate the 'text' field for each entity
+        for entity in entities:
+            entity["text"] = clean_text[entity["start"]:entity["end"]]
+            del entity["_temp_end"]
+        
+        # Sort entities by start position
+        entities.sort(key=lambda x: x["start"])
+        
+        return clean_text, entities
+
+    def create_segment_annotations(self, source_uri: str, segments: list[dict[str, Any]]):
+        """Store segments as NERAnnotations (same pattern as EntityExtractionTask)."""
+        for segment in segments:
+            NERAnnotation(
+                activity_id=self.task_uri,
+                source_uri=source_uri,
+                class_uri=segment['label'],
+                start=segment['start'],
+                end=segment['end'],
+                agent=AI_COMPONENTS["segmenter"],
+                agent_type=AGENT_TYPES["ai_component"],
+                confidence=1.0
+            ).add_to_triplestore()
+            self.logger.info(
+                f"Created segment annotation '{segment['label']}' at [{segment['start']}:{segment['end']}]"
+            )
+    
+    def process(self):
+        """Main processing: fetch text, run model, store segments."""
+        config = get_config().segmentation
+        task_data = self.fetch_data()
+        self.logger.info(f"Processing segmentation for {self.source}")
+        
+        if not task_data or not task_data.strip():
+            self.logger.warning("No content available for segmentation")
+            return
+        
+        # Build prompt in training format
+        messages = [
+            {"role": "system", "content": self.SYSTEM_INSTRUCTION},
+            {"role": "user", "content": f"PUBLIC DECISION:\n```\n{task_data}\n```"},
+        ]
+        
+        # Run model
+        generator = self.get_generator()
+        self.logger.info("Running segmentation model...")
+        output = generator(
+            messages,
+            max_new_tokens=config.max_new_tokens,
+            return_full_text=False,
+            temperature=config.temperature,
+            top_p=0.95,
+            do_sample=True,
+        )
+        raw_output = output[0]["generated_text"]
+        self.logger.info("Model generation complete")
+        
+        # Fix malformed tags and extract segments
+        fixed_output = self.fix_missing_tags(raw_output)
+        _, segments = self.extract_entities_ner_style(fixed_output)
+        self.logger.info(f"Extracted {len(segments)} segments from model")
+        
+        # Realign: find each segment's text in the SOURCE (model positions may be offset)
+        aligned_segments = []
+        for seg in segments:
+            text = seg.get('text', '').strip()
+            if len(text) < 3:
+                self.logger.warning(f"Skipping short segment '{seg['label']}': '{text}'")
+                continue
+            
+            pos = task_data.find(text)
+            if pos >= 0:
+                aligned_segments.append({
+                    'label': seg['label'],
+                    'start': pos,
+                    'end': pos + len(text),
+                    'text': text
+                })
+            else:
+                self.logger.warning(f"Could not find '{seg['label']}' in source")
+        
+        self.logger.info(f"Aligned {len(aligned_segments)}/{len(segments)} segments to source")
+        
+        # Store as NERAnnotations
+        self.create_segment_annotations(self.source, aligned_segments)
