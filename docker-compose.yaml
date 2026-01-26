@@ -22,13 +22,6 @@ services:
       - app-decide_default
     environment:
       MU_SPARQL_ENDPOINT: http://app-decide-virtuoso-1:8890/sparql
-      ETRANSLATION_USERNAME: ''
-      ETRANSLATION_PASSWORD: ''
-      ETRANSLATION_BASE_URL: 'https://language-tools.ec.europa.eu/etranslation/api'
-      ETRANSLATION_DOMAIN: 'GEN'
-      ETRANSLATION_TIMEOUT: '60'
-      ETRANSLATION_CALLBACK_TIMEOUT: '180'
-      ETRANSLATION_CALLBACK_URL: ''
       EXPECTED_TASK_PREDICATE: 'http://www.w3.org/ns/adms#status'
       EXPECTED_TASK_OBJECT: 'http://redpencil.data.gift/id/concept/JobStatus/scheduled'
     volumes:
