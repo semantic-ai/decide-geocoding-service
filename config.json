@@ -40,5 +40,10 @@
     "weight_decay": 0.01,
     "huggingface_token": null,
     "huggingface_output_model_id": null
+  },
+  "segmentation": {
+    "model_name": "wdmuer/decide-marked-segmentation",
+    "max_new_tokens": 4000,
+    "temperature": 0.1
   }
 }

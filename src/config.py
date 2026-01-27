@@ -182,6 +182,26 @@ class MLTrainingConfig(BaseModel):
     )
 
 
+class SegmentationConfig(BaseModel):
+    """Segmentation model configuration for document structure extraction."""
+    
+    model_name: str = Field(
+        default="wdmuer/decide-marked-segmentation",
+        description="HuggingFace model ID for text segmentation"
+    )
+    max_new_tokens: int = Field(
+        default=4000,
+        ge=100,
+        description="Maximum tokens to generate"
+    )
+    temperature: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=2.0,
+        description="Generation temperature (lower = more deterministic)"
+    )
+
+
 class AppConfig(BaseModel):
     """Root application configuration model."""
     
@@ -209,6 +229,10 @@ class AppConfig(BaseModel):
     ml_training: MLTrainingConfig = Field(
         default_factory=MLTrainingConfig,
         description="Machine learning training configuration"
+    )
+    segmentation: SegmentationConfig = Field(
+        default_factory=SegmentationConfig,
+        description="Segmentation model configuration"
     )
 
 
