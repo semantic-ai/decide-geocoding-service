@@ -839,11 +839,10 @@ class TranslationTask(DecisionTask):
 
 
 class SegmentationTask(DecisionTask):
-    """Task that segments public decision text into structural components."""
+    """Run the marked segmentation model and store segment spans as annotations."""
     
     __task_type__ = TASK_OPERATIONS["segmentation"]
     
-    # Class-level lazy-loaded model (same pattern as GeoExtractionTask)
     _generator = None
     _TAG_RE = re.compile(r"</?([A-Za-z0-9_]+)>")
     
@@ -868,7 +867,6 @@ SEGMENTS:
             seg_config = get_config().segmentation
             self.logger.info(f"Loading segmentation model: {seg_config.model_name}")
             
-            # Simple loading like in the notebooks
             self.__class__._generator = transformers_pipeline(
                 "text-generation",
                 model=seg_config.model_name,
@@ -891,16 +889,10 @@ SEGMENTS:
         return s[:m.end()], s[m.end():]
 
     def fix_missing_tags(self, text: str, separator: str = "\n\n") -> str:
-        """
-        Repairs missing begin/end tags and formats inserted tags naturally.
+        """Best-effort repair for malformed tag sequences in the model output.
 
-        - Missing end tags (open tag still on stack when a new <TAG> starts):
-            Close the open tag *right before* the new opening tag, but after trimming
-            trailing whitespace from the closed segment.
-        - Missing begin tags (stray </TAG>):
-            Insert <TAG> so that leading whitespace stays outside the new tag.
-        - Mismatched closing tags:
-            Close intervening tags right before the encountered close tag.
+        The model sometimes emits unmatched or mis-nested tags. This function tries to
+        produce a valid tag stream so that we can reliably extract spans afterwards.
         """
         stack: list[str] = []
         out: list[str] = []
@@ -961,15 +953,9 @@ SEGMENTS:
         return "".join(out)
 
     def extract_entities_ner_style(self, tagged_text: str) -> tuple[str, list[dict[str, Any]]]:
-        """
-        Extract NER-style entities from XML-tagged text.
-        
-        Returns:
-            Tuple of (clean_text, entities) where:
-            - clean_text: The text with all XML tags removed
-            - entities: List of dicts with keys: start, end, label, text
-            
-        The start/end positions are relative to the clean_text (without tags).
+        """Extract spans from the XML-tagged text.
+
+        The returned offsets are relative to `clean_text` (tagged_text with tags removed).
         """
         TAG_PATTERN = re.compile(r"<(/?)([A-Za-z0-9_]+)>")
         
@@ -977,7 +963,6 @@ SEGMENTS:
         clean_parts = []
         clean_pos = 0
         
-        # Stack to track open tags: [(tag_name, start_pos_in_clean_text), ...]
         open_tags: list[tuple[str, int]] = []
         
         last_end = 0
@@ -1024,7 +1009,7 @@ SEGMENTS:
         return clean_text, entities
 
     def create_segment_annotations(self, source_uri: str, segments: list[dict[str, Any]]):
-        """Store segments as NERAnnotations (same pattern as EntityExtractionTask)."""
+        """Store segment spans as `NERAnnotation` entries."""
         for segment in segments:
             NERAnnotation(
                 activity_id=self.task_uri,
@@ -1036,12 +1021,10 @@ SEGMENTS:
                 agent_type=AGENT_TYPES["ai_component"],
                 confidence=1.0
             ).add_to_triplestore()
-            self.logger.info(
-                f"Created segment annotation '{segment['label']}' at [{segment['start']}:{segment['end']}]"
-            )
+            self.logger.info(f"Created segment annotation for '{segment['label']}' at [{segment['start']}:{segment['end']}]")
     
     def process(self):
-        """Main processing: fetch text, run model, store segments."""
+        """Fetch source text, run the segmentation model, store spans."""
         config = get_config().segmentation
         task_data = self.fetch_data()
         self.logger.info(f"Processing segmentation for {self.source}")
@@ -1050,13 +1033,11 @@ SEGMENTS:
             self.logger.warning("No content available for segmentation")
             return
         
-        # Build prompt in training format
         messages = [
             {"role": "system", "content": self.SYSTEM_INSTRUCTION},
             {"role": "user", "content": f"PUBLIC DECISION:\n```\n{task_data}\n```"},
         ]
         
-        # Run model
         generator = self.get_generator()
         self.logger.info("Running segmentation model...")
         output = generator(
@@ -1070,20 +1051,23 @@ SEGMENTS:
         raw_output = output[0]["generated_text"]
         self.logger.info("Model generation complete")
         
-        # Fix malformed tags and extract segments
         fixed_output = self.fix_missing_tags(raw_output)
         _, segments = self.extract_entities_ner_style(fixed_output)
         self.logger.info(f"Extracted {len(segments)} segments from model")
         
-        # Realign: find each segment's text in the SOURCE (model positions may be offset)
+        # Align spans to the original source text. The model may echo prompt wrappers
+        # (e.g. ```json / PUBLIC DECISION:), which shifts offsets in the generated text.
         aligned_segments = []
+        cursor = 0
         for seg in segments:
             text = seg.get('text', '').strip()
             if len(text) < 3:
-                self.logger.warning(f"Skipping short segment '{seg['label']}': '{text}'")
+                self.logger.warning(f"Skipping short segment '{seg['label']}'")
                 continue
             
-            pos = task_data.find(text)
+            pos = task_data.find(text, cursor)
+            if pos < 0:
+                pos = task_data.find(text)
             if pos >= 0:
                 aligned_segments.append({
                     'label': seg['label'],
@@ -1091,6 +1075,7 @@ SEGMENTS:
                     'end': pos + len(text),
                     'text': text
                 })
+                cursor = pos + len(text)
             else:
                 self.logger.warning(f"Could not find '{seg['label']}' in source")
         
