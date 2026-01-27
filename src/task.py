@@ -1058,16 +1058,13 @@ SEGMENTS:
         # Align spans to the original source text. The model may echo prompt wrappers
         # (e.g. ```json / PUBLIC DECISION:), which shifts offsets in the generated text.
         aligned_segments = []
-        cursor = 0
         for seg in segments:
             text = seg.get('text', '').strip()
             if len(text) < 3:
-                self.logger.warning(f"Skipping short segment '{seg['label']}'")
+                self.logger.warning(f"Skipping short segment '{seg['label']}': '{text}'")
                 continue
             
-            pos = task_data.find(text, cursor)
-            if pos < 0:
-                pos = task_data.find(text)
+            pos = task_data.find(text)
             if pos >= 0:
                 aligned_segments.append({
                     'label': seg['label'],
@@ -1075,7 +1072,6 @@ SEGMENTS:
                     'end': pos + len(text),
                     'text': text
                 })
-                cursor = pos + len(text)
             else:
                 self.logger.warning(f"Could not find '{seg['label']}' in source")
         
