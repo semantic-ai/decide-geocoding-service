@@ -13,13 +13,16 @@
       "CONTEXT_DATE": "",
       "CONTEXT_LOCATION": "",
       "CONTEXT_PERIOD": "",
-      "PUBLICATION_DATE": "eli:date_document",
-      "SESSION_DATE": "",
+      "PUBLICATION_DATE": "eli:date_publication",
+      "SESSION_DATE": "eli:date_document",
       "ENTRY_DATE": "eli:first_date_entry_in_force",
       "EXPIRY_DATE": "eli:date_no_longer_in_force",
       "LEGAL_DATE": "",
       "VALIDITY_PERIOD": "",
-      "IMPACT_LOCATION": ""
+      "IMPACT_LOCATION": "",
+      "LEGAL_GROUND": "eli:based_on",
+      "ADMINISTRATIVE_BODY": "",
+      "MANDATARY": ""
     }
   },
   "geocoding": {
