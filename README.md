@@ -33,15 +33,30 @@ The original demo code can be found in the [demo](/demo) folder.
 
 ## Segmentation
 
-two different models:
-1. LLMSegmentor, implements Segemntation via Openai/AzureOpenai/Minstral/Olloma/...
-configuration via config.json :
-    - set apikey
-    - endpoint
-    - model
-    -tempartire
-    
-2. original code, reimplemented as GemmaSegmentor and functions identical to previous implementation.
- To enable it: change config.json to:
-    "model_name": "wdmuer/decide-marked-segmentation",
-    "max_new_tokens": 4000
+The service supports two different segmentation models, configurable via `config.json`.
+
+### 1. LLMSegmentor (Generic LLM)
+Default usage for general LLMs (OpenAI, Azure OpenAI, Mistral, Ollama, etc.). It instructs the model to return JSON structure.
+
+**Configuration in `config.json`:**
+```json
+"segmentation": {
+  "model_name": "gpt-4.1",       // Your model deployment name
+  "api_key": "YOUR_KEY",
+  "endpoint": "YOUR_ENDPOINT",
+  "temperature": 0.1,
+  "max_new_tokens": 14000
+}
+```
+
+### 2. GemmaSegmentor (Specialized Model)
+Uses the specialized `wdmuer/decide-marked-segmentation` model which is trained to output XML tags directly. Use this if you want to reproduce the original/legacy behavior.
+
+**To enable this mode**, you must set the `model_name` specifically:
+```json
+"segmentation": {
+  "model_name": "wdmuer/decide-marked-segmentation",
+  "max_new_tokens": 4000
+  // ... other fields as needed
+}
+```

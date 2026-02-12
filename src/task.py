@@ -845,17 +845,27 @@ class SegmentationTask(DecisionTask):
     __task_type__ = TASK_OPERATIONS["segmentation"]
     
     def _create_segmentor(self):
-        """Create a GemmaSegmentor configured from app config."""
+        """Create a Segmentor configured from app config."""
         from .library.segmentors import GemmaSegmentor, LLMSegmentor
         seg_config = get_config().segmentation
         api_key = seg_config.api_key.get_secret_value() if seg_config.api_key else None
-        return GemmaSegmentor(
-            api_key=api_key,
-            endpoint=seg_config.endpoint,
-            model_name=seg_config.model_name,
-            temperature=seg_config.temperature,
-            max_new_tokens=seg_config.max_new_tokens,
-        )
+
+        if seg_config.model_name == "wdmuer/decide-marked-segmentation":
+            return GemmaSegmentor(
+                api_key=api_key,
+                endpoint=seg_config.endpoint,
+                model_name=seg_config.model_name,
+                temperature=seg_config.temperature,
+                max_new_tokens=seg_config.max_new_tokens,
+            )
+        else:
+            return LLMSegmentor(
+                api_key=api_key,
+                endpoint=seg_config.endpoint,
+                model_name=seg_config.model_name,
+                temperature=seg_config.temperature,
+                max_new_tokens=seg_config.max_new_tokens,
+            )
     
     def create_segment_annotations(self, source_uri: str, segments: list[dict[str, Any]]):
         """Store segment spans as NERAnnotation entries."""
