@@ -27,3 +27,21 @@ and send a request to the /notify-change endpoint on the port as configured in t
 
 ## Original demo code
 The original demo code can be found in the [demo](/demo) folder.
+
+
+
+
+## Segmentation
+
+two different models:
+1. LLMSegmentor, implements Segemntation via Openai/AzureOpenai/Minstral/Olloma/...
+configuration via config.json :
+    - set apikey
+    - endpoint
+    - model
+    -tempartire
+    
+2. original code, reimplemented as GemmaSegmentor and functions identical to previous implementation.
+ To enable it: change config.json to:
+    "model_name": "wdmuer/decide-marked-segmentation",
+    "max_new_tokens": 4000

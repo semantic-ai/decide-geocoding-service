@@ -186,16 +186,24 @@ class SegmentationConfig(BaseModel):
     """Segmentation model configuration for document structure extraction."""
     
     model_name: str = Field(
-        default="wdmuer/decide-marked-segmentation",
-        description="HuggingFace model ID for text segmentation"
+        default="gpt-4.1",
+        description="LLM deployment / model name"
+    )
+    api_key: SecretStr | None = Field(
+        default=None,
+        description="API key for the LLM endpoint"
+    )
+    endpoint: str | None = Field(
+        default=None,
+        description="API endpoint URL for the LLM service"
     )
     max_new_tokens: int = Field(
-        default=4000,
+        default=14000,
         ge=100,
         description="Maximum tokens to generate"
     )
     temperature: float = Field(
-        default=0.1,
+        default=0.0,
         ge=0.0,
         le=2.0,
         description="Generation temperature (lower = more deterministic)"

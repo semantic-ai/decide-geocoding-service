@@ -838,7 +838,57 @@ class TranslationTask(DecisionTask):
         self.logger.info(f"Translation stored as annotation")
 
 
+# SegmentationTask and its variants both follow the same pattern: fetch text, run segmentor, store spans as annotations.
 class SegmentationTask(DecisionTask):
+    """Run the marked segmentation model and store segment spans as annotations."""
+    
+    __task_type__ = TASK_OPERATIONS["segmentation"]
+    
+    def _create_segmentor(self):
+        """Create a GemmaSegmentor configured from app config."""
+        from .library.segmentors import GemmaSegmentor, LLMSegmentor
+        seg_config = get_config().segmentation
+        api_key = seg_config.api_key.get_secret_value() if seg_config.api_key else None
+        return GemmaSegmentor(
+            api_key=api_key,
+            endpoint=seg_config.endpoint,
+            model_name=seg_config.model_name,
+            temperature=seg_config.temperature,
+            max_new_tokens=seg_config.max_new_tokens,
+        )
+    
+    def create_segment_annotations(self, source_uri: str, segments: list[dict[str, Any]]):
+        """Store segment spans as NERAnnotation entries."""
+        for segment in segments:
+            NERAnnotation(
+                activity_id=self.task_uri,
+                source_uri=source_uri,
+                class_uri=segment['label'],
+                start=segment['start'],
+                end=segment['end'],
+                agent=AI_COMPONENTS["segmenter"],
+                agent_type=AGENT_TYPES["ai_component"],
+                confidence=1.0
+            ).add_to_triplestore()
+            self.logger.info(f"Created segment annotation for '{segment['label']}' at [{segment['start']}:{segment['end']}] with text: '{segment.get('text', '')}'")
+    
+    def process(self):
+        """Fetch source text, run the segmentor, store spans."""
+        task_data = self.fetch_data()
+        self.logger.info(f"Processing segmentation for {self.source}")
+        
+        if not task_data or not task_data.strip():
+            self.logger.warning("No content available for segmentation")
+            return
+        
+        segmentor = self._create_segmentor()
+        segments = segmentor.segment(task_data)
+        self.logger.info(f"Segmentor returned {len(segments)} segments")
+        
+        self.create_segment_annotations(self.source, segments)
+
+# Deprecated backup version of SegmentationTask with custom tag-fixing and span extraction logic, kept for reference/testing but not currently used in main processing flow.
+class SegmentationTask_BKUP(DecisionTask):
     """Run the marked segmentation model and store segment spans as annotations."""
     
     __task_type__ = TASK_OPERATIONS["segmentation"]
@@ -1005,7 +1055,9 @@ SEGMENTS:
         
         # Sort entities by start position
         entities.sort(key=lambda x: x["start"])
-        
+        self.logger.info(f"Extracted {len(entities)} entities from tagged text")
+        self.logger.info(f"entities: {entities}")
+
         return clean_text, entities
 
     def create_segment_annotations(self, source_uri: str, segments: list[dict[str, Any]]):
