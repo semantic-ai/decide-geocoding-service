@@ -7,7 +7,7 @@ from src.airo import register_airo
 from src.task import Task
 from src.translation_plugin_etranslation import _callback_storage, _callback_lock
 from src.sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS
-from helpers import query, log
+from helpers import query, log, sparql_escape_uri
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel
@@ -77,12 +77,16 @@ def process_open_tasks():
 
 
 def get_one_open_task() -> str | None:
+    operations = "\n".join(sparql_escape_uri(value) for value in TASK_OPERATIONS.values())
     q = f"""
         {get_prefixes_for_query("task", "adms")}
         SELECT ?task WHERE {{
         GRAPH <{GRAPHS["jobs"]}> {{
+            VALUES ?targetOperations {
+                {operations}
+            }
             ?task adms:status <{JOB_STATUSES["scheduled"]}> ;
-                  task:operation <{TASK_OPERATIONS["pdf_content_extraction"]}> .
+                  task:operation ?targetOperations .
         }}
         }}
         limit 1
