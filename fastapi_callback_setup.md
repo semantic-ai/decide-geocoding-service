@@ -1,43 +1,27 @@
-### FastAPI eTranslation callback setup (no tunneling)
+### FastAPI eTranslation callback setup
 
-This project is configured to use the EU eTranslation REST v2 **text** API with HTTP callbacks, as described in the official documentation [`eTranslation REST v2 Text`](https://language-tools.ec.europa.eu/dev-corner/etranslation/rest-v2/text).
-
-The callbacks are handled by the main FastAPI app instead of a standalone HTTP server or ngrok.
+This service uses the EU eTranslation REST v2 API with HTTP callbacks. Callbacks are handled by the FastAPI app in `web.py` - no need for ngrok or a separate server.
 
 ---
 
-### 1. Callback flow overview
+### How it works
 
-- The service sends translation requests to:
-  - `translation.etranslation.base_url + "/askTranslate"`  
-    (by default `https://language-tools.ec.europa.eu/etranslation/api/askTranslate`)
-- Each request includes (see `src/translation_plugin_etranslation.py`):
-  - `textToTranslate`
-  - `sourceLanguage` (explicit, no `"auto"`)
-  - `targetLanguages` (list of ISO 639‑1 codes, e.g. `["EN"]`)
-  - `domain` (e.g. `"GEN"`)
-  - `notifications.success.http`, `notifications.failure.http`
-  - `deliveries.http`
-- All three callback URLs point to:
-  - `f"{translation.etranslation.callback_url}/callback"`
-- The FastAPI route that receives these callbacks is:
-  - `POST /etranslation/callback` in `web.py`
-- Therefore, **`callback_url` must be the public base URL** of:
-  - `https://your-host-or-domain/etranslation`
+1. Service sends translation requests to eTranslation API
+2. eTranslation processes the request asynchronously
+3. eTranslation POSTs the result back to your `callback_url` + `/callback`
+4. The route `POST /etranslation/callback` in `web.py` receives and processes it
 
-eTranslation will POST JSON payloads (success, error, delivery) to  
-`https://your-host-or-domain/etranslation/callback`, matching the REST v2 spec.
+The callback URL you configure must be publicly reachable by eTranslation's servers.
 
 ---
 
-### 2. Configuration
+### Configuration
 
-All eTranslation settings are configured in `config.json` under `translation.etranslation`:
+Set up eTranslation in `config.json`:
 
 ```json
 {
   "translation": {
-    "target_language": "en",
     "provider": "etranslation",
     "etranslation": {
       "base_url": "https://language-tools.ec.europa.eu/etranslation/api",
@@ -45,124 +29,83 @@ All eTranslation settings are configured in `config.json` under `translation.etr
       "username": "your-username",
       "password": "your-password",
       "domain": "GEN",
-      "timeout_seconds": 60,
-      "callback_wait_timeout": 180,
-      "max_text_length": 4000,
-      "callback_url": "https://your-host-or-domain/etranslation"
+      "callback_url": "https://your-dispatcher-domain/etranslation"
     }
   }
 }
 ```
 
-**Authentication options** (choose one):
-- **Bearer token**: Set `bearer_token` to your token
-- **Basic auth**: Set `username` and `password`
+Use either `bearer_token` OR `username`/`password` for auth.
 
-> Note: `callback_url` **must not** contain `/callback` or `localhost`.  
-> The code will append `/callback` and will reject pure localhost as eTranslation
-> cannot reach it from the EU infrastructure.
+**Important:** Don't include `/callback` in `callback_url` - the code adds it automatically. Also don't use `localhost` - eTranslation can't reach it.
 
 ---
 
-### 3. Server requirements
+### Use a dispatcher (recommended)
 
-Run this on a server where you can:
+Don't open ports on your router. Instead, expose the service through your dispatcher (nginx, Traefik, etc.) that already has ports 80/443 open.
 
-- Expose HTTP/HTTPS ports (80 and/or 443; 8082 is fine for testing)
-- Control firewall rules (allow inbound traffic)
-- Optionally have a DNS name pointing to the server (recommended)
+**Setup:**
 
-The `docker-compose.yaml` mounts `config.json` as read-only:
+1. Configure dispatcher to route `/etranslation/*` → `geocoding-service:80`
 
-```yaml
-services:
-  geocoding-service:
-    build:
-      context: .
-    ports:
-      - "8082:80"       # default in this repo; change to "80:80" on a public server
-    volumes:
-      - ./config.json:/app/config.json:ro  # Mount config as read-only
-```
+   Example nginx config:
+   ```nginx
+   location /etranslation {
+       proxy_pass http://geocoding-service:80;
+       proxy_set_header Host $host;
+       proxy_set_header X-Real-IP $remote_addr;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto $scheme;
+   }
+   ```
 
----
+2. Set `callback_url` in `config.json` to your dispatcher's public URL:
+   ```json
+   "callback_url": "https://your-dispatcher-domain/etranslation"
+   ```
 
-### 4. Network and firewall configuration
+That's it. The dispatcher forwards `/etranslation/callback` to your service internally.
 
-On the server:
-
-1. **Ports**
-   - If you map `8082:80` (default in this repo):
-     - Open inbound TCP port 8082.
-   - If you change it to `80:80` on the server:
-     - Ensure inbound TCP port 80 is allowed in the OS firewall (e.g. `ufw`, `firewalld`, security groups).
-2. **DNS (recommended)**
-   - Point a DNS record to the server IP, e.g.:
-     - `A geocoding.example.com -> 203.0.113.10`
-   - Then set in `config.json`:
-     - `"callback_url": "https://geocoding.example.com/etranslation"`
-   - Or for plain HTTP testing:
-     - `"callback_url": "http://geocoding.example.com/etranslation"`
-
-HTTPS is strongly recommended in production and aligns with the examples in the
-official docs, but the code will work over HTTP as well if your environment
-allows it.
+**Why use a dispatcher:**
+- No router port forwarding needed
+- SSL termination handled centrally
+- Service stays internal (better security)
+- Standard setup for microservices
 
 ---
 
-### 5. FastAPI callback contract
+### Testing
 
-The FastAPI route in `web.py`:
+1. **Local test** (from the server):
+   ```bash
+   curl -X POST "http://localhost/etranslation/callback" \
+     -H "Content-Type: application/json" \
+     -d '{"requestId": 12345, "targetLanguage": "EN"}'
+   ```
+   Should return `{"status":"received"}`.
 
-- Accepts `POST /etranslation/callback` with a JSON body.
-- Mirrors the eTranslation callback structure described in the REST v2 text docs:
-  - Handles:
-    - Success and delivery callbacks with `requestId` and `targetLanguage` (or variants).
-    - Error callbacks with `errorCode`, `errorMessage`, and `targetLanguages` list.
-  - Stores the raw payload in an in‑memory dict keyed by `(requestId, targetLanguage)`.
-  - Responds with a small JSON body, e.g. `{"status": "received"}`.
+2. **External test** (via dispatcher):
+   ```bash
+   curl -X POST "https://your-dispatcher-domain/etranslation/callback" \
+     -H "Content-Type: application/json" \
+     -d '{"requestId": 12345, "targetLanguage": "EN"}'
+   ```
+   Should return `{"status":"received"}`.
 
-This matches the behaviour expected by the eTranslation backend:
-callbacks are acknowledged with HTTP 200, and any errors/timeouts are handled
-on the client side by waiting for the callback up to `callback_wait_timeout`.
+3. **End-to-end test:**
+   - Trigger a translation task
+   - Watch logs: `docker-compose logs -f geocoding-service`
+   - You should see the `/askTranslate` request and later the callback being received
 
 ---
 
-### 6. How to test on a real server
+### Callback handling
 
-1. **Deploy**
-   - Copy the repo to the server.
-   - Edit `config.json` with your eTranslation credentials and `callback_url`.
-   - Run:
-     ```bash
-     docker-compose up --build -d
-     ```
-2. **Verify locally on the server**
-   - From the server itself:
-     ```bash
-     curl -X POST "http://localhost/etranslation/callback" \
-       -H "Content-Type: application/json" \
-       -d '{"requestId": 12345, "targetLanguage": "EN"}'
-     ```
-   - Expected response: a small JSON such as `{"status":"received"}`.
-3. **Verify externally**
-   - From another machine on the internet:
-     ```bash
-     curl -X POST "https://your-host-or-domain/etranslation/callback" \
-       -H "Content-Type: application/json" \
-       -d '{"requestId": 12345, "targetLanguage": "EN"}'
-     ```
-   - If this returns `{"status":"received"}`, the callback endpoint is reachable.
-4. **End‑to‑end with eTranslation**
-   - Trigger a translation through the application (e.g. via a `TranslationTask`).
-   - Watch logs of `geocoding-service`:
-     ```bash
-     docker-compose logs -f geocoding-service
-     ```
-   - You should see:
-     - A call to `/askTranslate` with a positive `requestId`.
-     - A later log from the FastAPI callback handler indicating the callback was received for that `requestId` and `targetLanguage`.
+The route `POST /etranslation/callback` in `web.py` handles:
+- Success callbacks with `requestId` and `targetLanguage`
+- Error callbacks with `errorCode` and `errorMessage`
+- Stores results in memory keyed by `(requestId, targetLanguage)`
+- Returns `{"status": "received"}`
 
-If all of the above steps work, the setup is ready for others to use on any
-server with a public IP and proper firewall configuration, without any tunneling
-services.
+The service waits up to `callback_wait_timeout` seconds (default 180) for callbacks before timing out.
