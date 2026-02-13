@@ -93,8 +93,11 @@ class Task(ABC):
             }
             WHERE {
             GRAPH <""" + GRAPHS["jobs"] + """> {
-                BIND($task AS ?task)
-                BIND(<$old_status> AS ?oldStatus)
+                VALUES ?task {
+                  $task
+                }
+                ?task a ?thing .
+                
                 OPTIONAL { ?task adms:status ?oldStatus . }
             }
             }
@@ -106,7 +109,6 @@ class Task(ABC):
 
         query_string = query_template.substitute(
             new_status=JOB_STATUSES[new_state],
-            old_status=JOB_STATUSES[old_state],
             task=sparql_escape_uri(self.task_uri),
             results_container_line=results_container_line)
 
@@ -148,7 +150,9 @@ class DecisionTask(Task, ABC):
             get_prefixes_for_query("dct", "task", "nfo") +
             """
         SELECT ?source WHERE {
-          BIND($task AS ?t)
+          VALUES ?t {
+            $task
+          }
           ?t a task:Task .
           OPTIONAL { 
             ?t task:inputContainer ?ic . 
@@ -167,10 +171,13 @@ class DecisionTask(Task, ABC):
         query_template = Template(
             get_prefixes_for_query("eli", "eli-dl", "dct", "epvoc") +
             """
-            SELECT ?graph ?title ?description ?decision_basis ?content ?lang
+            SELECT DISTINCT ?graph ?title ?description ?decision_basis ?content ?lang
             WHERE {
               GRAPH ?graph {
-                BIND($source AS ?s)
+                VALUES ?s {
+                  $source
+                }
+                ?s a ?thing .
                 OPTIONAL { ?s eli:title ?title }
                 OPTIONAL { ?s eli:description ?description }
                 OPTIONAL { ?s eli-dl:decision_basis ?decision_basis }
