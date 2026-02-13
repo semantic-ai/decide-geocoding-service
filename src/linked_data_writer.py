@@ -1,5 +1,5 @@
 from uuid import uuid4
-from helpers import query
+from helpers import update
 from string import Template
 from escape_helpers import sparql_escape_uri, sparql_escape_string, sparql_escape_float, sparql_escape_int
 from .sparql_config import get_prefixes_for_query, GRAPHS
@@ -100,4 +100,4 @@ def insert_annotation(geo_entity: str, body_uri: str,
         end=sparql_escape_int(end_offset),
         geo_entity_specific_part=geo_entity_query_string)
 
-    query(insertion_query_string)
+    update(insertion_query_string, sudo=True)

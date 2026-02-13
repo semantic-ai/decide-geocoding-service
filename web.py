@@ -1,10 +1,13 @@
 import os
 import json
 import logging
+import time
 
 from src.airo import register_airo
 from src.task import Task
 from src.translation_plugin_etranslation import _callback_storage, _callback_lock
+from src.sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS
+from helpers import query, log, sparql_escape_uri
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel
@@ -13,16 +16,12 @@ from typing import Literal
 
 @app.on_event("startup")
 async def startup_event():
+    wait_for_triplestore()
     register_airo()
+    process_open_tasks()
 
 
 router = APIRouter()
-
-
-class Value(BaseModel):
-    type: str
-    value: str
-
 
 class ExpectedTaskPredicateValue(BaseModel):
     value: Literal[os.getenv("EXPECTED_TASK_PREDICATE")]
@@ -30,23 +29,6 @@ class ExpectedTaskPredicateValue(BaseModel):
 
 class ExpectedTaskObjectValue(BaseModel):
     value: Literal[os.getenv("EXPECTED_TASK_OBJECT")]
-
-
-class Triplet(BaseModel):
-    subject: Value
-    predicate: Value
-    object: Value
-    graph: Value
-
-
-class InsertTriplet(Triplet):
-    predicate: ExpectedTaskPredicateValue
-    object: ExpectedTaskObjectValue
-
-
-class DeltaNotification(BaseModel):
-    inserts: list[InsertTriplet]
-    deletes: list[Triplet]
 
 
 class NotificationResponse(BaseModel):
@@ -59,12 +41,59 @@ class TaskOperationsResponse(BaseModel):
 
 
 @router.post("/delta", status_code=202)
-async def delta(data: list[DeltaNotification], background_tasks: BackgroundTasks) -> NotificationResponse:
-    for patch in data:
-        for ins in patch.inserts:
-            task = Task.from_uri(ins.subject.value)
-            background_tasks.add_task(task.execute)
+async def delta(background_tasks: BackgroundTasks) -> NotificationResponse:
+    background_tasks.add_task(process_open_tasks)
     return NotificationResponse(status="accepted", message="Processing started")
+
+def wait_for_triplestore():
+    triplestore_live = False
+    log("Waiting for triplestore...")
+    while not triplestore_live:
+        try:
+            result = query(
+                """
+                SELECT ?s WHERE {
+                ?s ?p ?o.
+                } LIMIT 1""",
+            sudo=True)
+            if result["results"]["bindings"][0]["s"]["value"]:
+                triplestore_live = True
+            else:
+                raise Exception("triplestore not ready yet...")
+        except Exception as _e:
+            log("Triplestore not live yet, retrying...")
+            time.sleep(1)
+    log("Triplestore ready!")
+
+def process_open_tasks():
+    logger = logging.getLogger(__name__)
+    logger.info("Checking for open tasks...")
+    uri = get_one_open_task()
+    while uri is not None:
+        logger.info("Processing {uri}")
+        task = Task.from_uri(uri)
+        task.execute()
+        uri = get_one_open_task()
+
+
+def get_one_open_task() -> str | None:
+    operations = "\n".join(sparql_escape_uri(value) for value in TASK_OPERATIONS.values())
+    q = f"""
+        {get_prefixes_for_query("task", "adms")}
+        SELECT ?task WHERE {{
+        GRAPH <{GRAPHS["jobs"]}> {{
+            VALUES ?targetOperations {
+                {operations}
+            }
+            ?task adms:status <{JOB_STATUSES["scheduled"]}> ;
+                  task:operation ?targetOperations .
+        }}
+        }}
+        limit 1
+    """
+    results = query(q, sudo=True)
+    bindings = results.get("results", {}).get("bindings", [])
+    return bindings[0]["task"]["value"] if bindings else None
 
 
 @router.get("/task/operations")
