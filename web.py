@@ -7,7 +7,8 @@ from src.airo import register_airo
 from src.task import Task
 from src.translation_plugin_etranslation import _callback_storage, _callback_lock
 from src.sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS
-from helpers import query, log, sparql_escape_uri
+from helpers import query, log
+from escape_helpers import sparql_escape_uri
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel
