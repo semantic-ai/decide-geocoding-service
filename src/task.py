@@ -291,7 +291,7 @@ class EntityExtractionTask(DecisionTask):
             if entity['label'] == 'TITLE':
                 TripletAnnotation(
                     subject=self.source,
-                    predicate="dct:title",
+                    predicate="eli:title",
                     obj=sparql_escape_string(entity['text']),
                     activity_id=self.task_uri,
                     source_uri=source_uri,
