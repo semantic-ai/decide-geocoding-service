@@ -411,11 +411,12 @@ class GeoAnnotation(NERAnnotation):
 class TripletAnnotation(NERAnnotation):
     """NER annotation representing an RDF statement (subject-predicate-object triple)."""
     
-    def __init__(self, subject: str, predicate: str, obj: str, activity_id: str, source_uri: str, start: Optional[int], end: Optional[int], agent: str, agent_type: str):
+    def __init__(self, subject: str, predicate: str, obj: str, activity_id: str, source_uri: str, start: Optional[int], end: Optional[int], agent: str, agent_type: str, confidence: float = 1.0):
         super().__init__(activity_id, source_uri, predicate, start, end, agent, agent_type)
         self.predicate = predicate
         self.object = obj
         self.subject = subject
+        self.confidence = confidence
 
     def to_labelstudio_result(self) -> dict:
         return {}
@@ -491,7 +492,7 @@ class TripletAnnotation(NERAnnotation):
                   $annotation_id a oa:Annotation ;
                      mu:uuid "$id";
                      oa:hasBody $skolem ;
-                     nif:confidence 1 ;
+                     nif:confidence $confidence ;
                      oa:motivatedBy oa:linking ;
                      oa:hasTarget $part_of_id .
                                  
@@ -531,6 +532,7 @@ class TripletAnnotation(NERAnnotation):
             subject=sparql_escape_uri(self.subject),
             pred=self.predicate,  # Already escaped or prefixed name
             obj=self.object,  # Already escaped (string literal or URI)
+            confidence=sparql_escape_float(self.confidence),
             part_of_id=part_of_id,
             selector_part=selector_part,
             selector_filter=selector_filter

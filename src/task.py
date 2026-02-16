@@ -291,7 +291,7 @@ class EntityExtractionTask(DecisionTask):
             if entity['label'] == 'TITLE':
                 TripletAnnotation(
                     subject=self.source,
-                    predicate="dct:title",
+                    predicate="eli:title",
                     obj=sparql_escape_string(entity['text']),
                     activity_id=self.task_uri,
                     source_uri=source_uri,
@@ -303,20 +303,33 @@ class EntityExtractionTask(DecisionTask):
                 self.logger.info(f"Created Title triplet suggestion for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
 
     def create_general_entity_annotations(self, source_uri: str, entities: list[dict[str, Any]]):
-        """Create annotations for general entities (DATE, PERSON, ORG, etc.)"""
+        """
+        Create triplet suggestions for entities by mapping (refined) labels to RDF predicates.
+        
+        Only entities with a configured mapping are saved. If a label is unmapped
+        (or mapped to an empty string), the entity is skipped.
+        """
+        config = get_config()
+        label_to_predicate = config.ner.label_to_predicate or {}
+
         for entity in entities:
-            NERAnnotation(
+            label = str(entity.get("label", "")).upper()
+            predicate = (label_to_predicate.get(label) or "").strip()
+            if not predicate:
+                continue
+
+            TripletAnnotation(
+                subject=self.source,
+                predicate=predicate,
+                obj=sparql_escape_string(entity["text"]),
                 activity_id=self.task_uri,
                 source_uri=source_uri,
-                class_uri=entity['label'],
-                start=entity['start'],
-                end=entity['end'],
+                start=entity.get("start"),
+                end=entity.get("end"),
                 agent=AI_COMPONENTS["ner_extractor"],
                 agent_type=AGENT_TYPES["ai_component"],
-                confidence=entity.get('confidence', 1.0)
+                confidence=entity.get("confidence", 1.0),
             ).add_to_triplestore()
-            confidence_str = f" (confidence: {entity.get('confidence', 1.0):.2f})" if 'confidence' in entity else ""
-            self.logger.info(f"Created NER annotation for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]{confidence_str}")
 
     def extract_general_entities(self, task_data: str, language: str = None, method: str = None) -> list[dict[str, Any]]:
         """

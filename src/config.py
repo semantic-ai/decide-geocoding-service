@@ -35,6 +35,13 @@ class NerConfig(BaseModel):
         default=True,
         description="Whether to apply entity refinement to classify generic labels (DATE, LOCATION) into specific types"
     )
+    label_to_predicate: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Optional mapping from (refined) entity labels to RDF predicates (prefixed names, e.g. "
+            "'PUBLICATION_DATE' -> 'eli:date_publication'). Labels with missing/empty mappings are skipped."
+        ),
+    )
 
 
 class AppSettingsConfig(BaseModel):
