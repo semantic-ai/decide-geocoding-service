@@ -21,7 +21,7 @@
       "VALIDITY_PERIOD": "",
       "IMPACT_LOCATION": "",
       "LEGAL_GROUND": "eli:based_on",
-      "ADMINISTRATIVE_BODY": "",
+      "ADMINISTRATIVE_BODY": "eli:passed_by",
       "MANDATARY": ""
     }
   },
