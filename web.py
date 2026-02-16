@@ -71,7 +71,7 @@ def process_open_tasks():
     logger.info("Checking for open tasks...")
     uri = get_one_open_task()
     while uri is not None:
-        logger.info("Processing {uri}")
+        logger.info(f"Processing {uri}")
         task = Task.from_uri(uri)
         task.execute()
         uri = get_one_open_task()
