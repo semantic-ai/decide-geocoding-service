@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Any, Type
 
 from uuid import uuid4
-from helpers import query
+from helpers import query, update
 from string import Template
 from translatepy import Translator
 from escape_helpers import sparql_escape_uri, sparql_escape_string
@@ -66,7 +66,7 @@ class Task(ABC):
               FILTER(?task = $uri)
             }
         """).substitute(uri=sparql_escape_uri(task_uri))
-        for b in query(q).get('results').get('bindings'):
+        for b in query(q, sudo=True).get('results').get('bindings'):
             candidate_cls = cls.lookup(b['taskType']['value'])
             if candidate_cls is not None:
                 return candidate_cls(task_uri)
@@ -93,8 +93,11 @@ class Task(ABC):
             }
             WHERE {
             GRAPH <""" + GRAPHS["jobs"] + """> {
-                BIND($task AS ?task)
-                BIND(<$old_status> AS ?oldStatus)
+                VALUES ?task {
+                  $task
+                }
+                ?task a ?thing .
+                
                 OPTIONAL { ?task adms:status ?oldStatus . }
             }
             }
@@ -106,11 +109,10 @@ class Task(ABC):
 
         query_string = query_template.substitute(
             new_status=JOB_STATUSES[new_state],
-            old_status=JOB_STATUSES[old_state],
             task=sparql_escape_uri(self.task_uri),
             results_container_line=results_container_line)
 
-        query(query_string)
+        update(query_string, sudo=True)
 
     @contextlib.contextmanager
     def run(self):
@@ -148,7 +150,9 @@ class DecisionTask(Task, ABC):
             get_prefixes_for_query("dct", "task", "nfo") +
             """
         SELECT ?source WHERE {
-          BIND($task AS ?t)
+          VALUES ?t {
+            $task
+          }
           ?t a task:Task .
           OPTIONAL { 
             ?t task:inputContainer ?ic . 
@@ -156,7 +160,7 @@ class DecisionTask(Task, ABC):
           }
         }
         """).substitute(task=sparql_escape_uri(task_uri))
-        r = query(q)
+        r = query(q, sudo=True)
         bindings = r.get("results", {}).get("bindings", [])
         if not bindings or "source" not in bindings[0] or "value" not in bindings[0].get("source", {}):
             raise ValueError(f"No source found for task {task_uri}")
@@ -167,10 +171,13 @@ class DecisionTask(Task, ABC):
         query_template = Template(
             get_prefixes_for_query("eli", "eli-dl", "dct", "epvoc") +
             """
-            SELECT ?graph ?title ?description ?decision_basis ?content ?lang
+            SELECT DISTINCT ?graph ?title ?description ?decision_basis ?content ?lang
             WHERE {
               GRAPH ?graph {
-                BIND($source AS ?s)
+                VALUES ?s {
+                  $source
+                }
+                ?s a ?thing .
                 OPTIONAL { ?s eli:title ?title }
                 OPTIONAL { ?s eli:description ?description }
                 OPTIONAL { ?s eli-dl:decision_basis ?decision_basis }
@@ -182,7 +189,7 @@ class DecisionTask(Task, ABC):
 
         query_result = query(query_template.substitute(
             source=sparql_escape_uri(self.source)
-        ))
+        ), sudo=True)
 
         bindings = query_result.get("results", {}).get("bindings", [])
         texts: list[str] = []
@@ -499,7 +506,7 @@ class ModelBatchAnnotatingTask(Task, ABC):
         }
         """
 
-        response = query(q)
+        response = query(q, sudo=True)
         bindings = response.get("results", {}).get("bindings", [])
         decision_uris = [b["s"]["value"] for b in bindings if "s" in b]
 
@@ -592,7 +599,7 @@ class ClassifierTrainingTask(Task, ABC):
         }
         """
 
-        res = query(q)
+        res = query(q, sudo=True)
         bindings = res.get("results", {}).get("bindings", [])
 
         results = []
@@ -690,7 +697,7 @@ class TranslationTask(DecisionTask):
             LIMIT 1
             """).substitute(source=self.source)
         
-        result = query(query_string)
+        result = query(query_string, sudo=True)
         bindings = result.get("results", {}).get("bindings", [])
         language_uri = None
         if bindings and "language" in bindings[0] and "value" in bindings[0].get("language", {}):

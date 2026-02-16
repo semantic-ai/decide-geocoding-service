@@ -1,5 +1,5 @@
 from string import Template
-from helpers import query
+from helpers import update
 from escape_helpers import sparql_escape_uri
 from .sparql_config import get_prefixes_for_query, GRAPHS, ORGANIZATIONS
 
@@ -25,4 +25,4 @@ def register_airo():
     query_string = query_template.substitute(
         provider=sparql_escape_uri(digiteam)
     )
-    query(query_string)
+    update(query_string, sudo=True)

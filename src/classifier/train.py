@@ -6,7 +6,7 @@ from .metrics import get_metric_cls
 from .ld import build_airo_model_insert_query
 from ..config import get_config
 
-from helpers import query
+from helpers import update
 from transformers import AutoTokenizer, DataCollatorWithPadding, AutoModelForSequenceClassification, TrainingArguments, Trainer, pipeline
 
 
@@ -106,7 +106,7 @@ def train(
             results=results
         )
 
-        # query(query_str)
+        update(query_str, sudo=True)
 
         print(query_str, flush=True)
 
