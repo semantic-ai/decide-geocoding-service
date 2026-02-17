@@ -1043,7 +1043,7 @@ class SegmentationTask(DecisionTask):
               # Find expressions that realize the work
               GRAPH ?g {
                 ?en_expr a eli:Expression ;
-                  eli:realizes <$work> .
+                  eli:realizes $work .
               }
               # And have English language annotation
               GRAPH <""" + GRAPHS["ai"] + """> {
@@ -1051,7 +1051,7 @@ class SegmentationTask(DecisionTask):
                 ?stmt a rdf:Statement ;
                   rdf:subject ?en_expr ;
                   rdf:predicate eli:language ;
-                  rdf:object <$en_lang> .
+                  rdf:object $en_lang .
               }
             }
             LIMIT 1
@@ -1087,9 +1087,8 @@ class SegmentationTask(DecisionTask):
             WHERE {
               GRAPH ?graph {
                 VALUES ?s {
-                  <$expression>
+                  $expression
                 }
-                ?s a ?thing .
                 OPTIONAL { ?s eli:title ?title }
                 OPTIONAL { ?s eli:description ?description }
                 OPTIONAL { ?s eli-dl:decision_basis ?decision_basis }
