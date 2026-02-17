@@ -343,7 +343,7 @@ class EntityExtractionTask(DecisionTask):
             self.logger.error(error_msg)
             raise ValueError(error_msg)
         TripletAnnotation(
-            subject=self.source,
+            subject=source_uri,
             predicate="eli:language",
             obj=sparql_escape_uri(lang_uri),
             activity_id=self.task_uri,
@@ -358,7 +358,7 @@ class EntityExtractionTask(DecisionTask):
         for entity in entities:
             if entity['label'] == 'TITLE':
                 TripletAnnotation(
-                    subject=self.source,
+                    subject=source_uri,
                     predicate="eli:title",
                     obj=sparql_escape_string(entity['text']),
                     activity_id=self.task_uri,
@@ -387,7 +387,7 @@ class EntityExtractionTask(DecisionTask):
                 continue
 
             TripletAnnotation(
-                subject=self.source,
+                subject=source_uri,
                 predicate=predicate,
                 obj=sparql_escape_string(entity["text"]),
                 activity_id=self.task_uri,
