@@ -223,7 +223,8 @@ class DecisionTask(Task, ABC):
         )
 
         query_result = query(
-            query_template.substitute(source=sparql_escape_uri(self.source))
+            query_template.substitute(source=sparql_escape_uri(self.source)),
+            sudo=True
         )
         bindings = query_result.get("results", {}).get("bindings", [])
         if bindings and "work" in bindings[0]:
@@ -464,7 +465,7 @@ class EntityExtractionTask(DecisionTask):
             }}
             """
         )
-        query(query_string)
+        update(query_string, sudo=True)
 
         # Also create an annotated statement that "EN expression realizes work",
         # targeting the original (NL) expression via oa:SpecificResource, as in the diagram.
@@ -928,7 +929,7 @@ class TranslationTask(DecisionTask):
             }}
             """
         )
-        query(query_string, sudo=True)
+        update(query_string, sudo=True)
 
         # Also create an annotated statement that "translated expression realizes work",
         # targeting the original expression via oa:SpecificResource.
@@ -1017,6 +1018,103 @@ class SegmentationTask(DecisionTask):
     
     __task_type__ = TASK_OPERATIONS["segmentation"]
     
+    def fetch_english_expression_uri(self) -> Optional[str]:
+        """
+        Find the English expression that realizes the same work as the source expression.
+        Returns the URI of the English expression if found, None otherwise.
+        """
+        work_uri = self.fetch_work_uri()
+        if not work_uri:
+            self.logger.info(f"No work found for expression {self.source}, cannot find English translation")
+            return None
+        
+        # Get English language URI
+        en_lang_uri = LANGUAGE_CODE_TO_URI.get("en")
+        if not en_lang_uri:
+            self.logger.warning("English language URI not found in LANGUAGE_CODE_TO_URI")
+            return None
+        
+        # Query for English expression that realizes the same work
+        # Check via language annotation (since we use TripletAnnotation for language, not dct:language)
+        query_template = Template(
+            get_prefixes_for_query("eli", "rdf", "oa") +
+            """
+            SELECT DISTINCT ?en_expr WHERE {
+              # Find expressions that realize the work
+              GRAPH ?g {
+                ?en_expr a eli:Expression ;
+                  eli:realizes <$work> .
+              }
+              # And have English language annotation
+              GRAPH <""" + GRAPHS["ai"] + """> {
+                ?ann oa:hasBody ?stmt .
+                ?stmt a rdf:Statement ;
+                  rdf:subject ?en_expr ;
+                  rdf:predicate eli:language ;
+                  rdf:object <$en_lang> .
+              }
+            }
+            LIMIT 1
+            """
+        )
+        
+        query_result = query(
+            query_template.substitute(
+                work=sparql_escape_uri(work_uri),
+                en_lang=sparql_escape_uri(en_lang_uri)
+            ),
+            sudo=True
+        )
+        
+        bindings = query_result.get("results", {}).get("bindings", [])
+        if bindings and "en_expr" in bindings[0]:
+            en_expr_uri = bindings[0]["en_expr"]["value"]
+            self.logger.info(f"Found English expression {en_expr_uri} for work {work_uri}")
+            return en_expr_uri
+        
+        self.logger.info(f"No English expression found for work {work_uri}")
+        return None
+    
+    def fetch_expression_data(self, expression_uri: str) -> str:
+        """
+        Retrieve the text content from a specific expression URI.
+        Similar to fetch_data() but for a specific expression.
+        """
+        query_template = Template(
+            get_prefixes_for_query("eli", "eli-dl", "dct", "epvoc") +
+            """
+            SELECT DISTINCT ?title ?description ?decision_basis ?content
+            WHERE {
+              GRAPH ?graph {
+                VALUES ?s {
+                  <$expression>
+                }
+                ?s a ?thing .
+                OPTIONAL { ?s eli:title ?title }
+                OPTIONAL { ?s eli:description ?description }
+                OPTIONAL { ?s eli-dl:decision_basis ?decision_basis }
+                OPTIONAL { ?s epvoc:expressionContent ?content }
+              }
+            }
+        """)
+
+        query_result = query(
+            query_template.substitute(expression=sparql_escape_uri(expression_uri)),
+            sudo=True
+        )
+
+        bindings = query_result.get("results", {}).get("bindings", [])
+        texts: list[str] = []
+        seen = set()
+        for binding in bindings:
+            for field in ("content", "title", "description", "decision_basis"):
+                value = binding.get(field, {}).get("value")
+                if value and value not in seen:
+                    texts.append(value)
+                    seen.add(value)
+
+        return "\n".join(texts)
+    
     def _create_segmentor(self):
         """Create a Segmentor configured from app config."""
         from .library.segmentors import GemmaSegmentor, LLMSegmentor
@@ -1041,24 +1139,52 @@ class SegmentationTask(DecisionTask):
             )
     
     def create_segment_annotations(self, source_uri: str, segments: list[dict[str, Any]]):
-        """Store segment spans as NERAnnotation entries."""
+        """
+        Store segment spans as TripletAnnotation.
+        Creates rdf:Statement with subject=expression, predicate=segment_type, object=segment_text.
+        """
         for segment in segments:
-            NERAnnotation(
+            segment_label = segment.get('label', 'UNKNOWN')
+            segment_text = segment.get('text', '')
+            
+            # Use segment label as predicate (e.g., "ex:TITLE", "ex:PARTICIPANTS")
+            # Convert to proper predicate format
+            predicate = f"ex:{segment_label}"
+            
+            TripletAnnotation(
+                subject=source_uri,
+                predicate=predicate,
+                obj=sparql_escape_string(segment_text),
                 activity_id=self.task_uri,
                 source_uri=source_uri,
-                class_uri=segment['label'],
-                start=segment['start'],
-                end=segment['end'],
+                start=segment.get('start'),
+                end=segment.get('end'),
                 agent=AI_COMPONENTS["segmenter"],
                 agent_type=AGENT_TYPES["ai_component"],
                 confidence=1.0
             ).add_to_triplestore()
-            self.logger.info(f"Created segment annotation for '{segment['label']}' at [{segment['start']}:{segment['end']}] with text: '{segment.get('text', '')}'")
+            self.logger.info(f"Created segment annotation for '{segment_label}' at [{segment.get('start')}:{segment.get('end')}] with text: '{segment_text[:50]}...'")
     
     def process(self):
-        """Fetch source text, run the segmentor, store spans."""
-        task_data = self.fetch_data()
+        """
+        Fetch English text through original expression (if translation available),
+        run the segmentor, and save annotations on the English expression.
+        """
         self.logger.info(f"Processing segmentation for {self.source}")
+        
+        # Try to find English expression that realizes the same work
+        english_expression_uri = self.fetch_english_expression_uri()
+        
+        if english_expression_uri:
+            # Use English expression for segmentation
+            self.logger.info(f"Found English expression {english_expression_uri}, using it for segmentation")
+            task_data = self.fetch_expression_data(english_expression_uri)
+            target_expression_uri = english_expression_uri
+        else:
+            # Fallback to original expression if no English translation available
+            self.logger.info(f"No English expression found, using original expression {self.source}")
+            task_data = self.fetch_data()
+            target_expression_uri = self.source
         
         if not task_data or not task_data.strip():
             self.logger.warning("No content available for segmentation")
@@ -1068,5 +1194,6 @@ class SegmentationTask(DecisionTask):
         segments = segmentor.segment(task_data)
         self.logger.info(f"Segmentor returned {len(segments)} segments")
         
-        self.create_segment_annotations(self.source, segments)
+        # Save annotations on the target expression (English if available, otherwise original)
+        self.create_segment_annotations(target_expression_uri, segments)
 
