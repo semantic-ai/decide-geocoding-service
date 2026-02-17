@@ -72,29 +72,39 @@ def process_open_tasks():
     uri = get_one_open_task()
     while uri is not None:
         logger.info(f"Processing {uri}")
-        task = Task.from_uri(uri)
-        task.execute()
+        try:
+            task = Task.from_uri(uri)
+            task.execute()
+        except Exception as e:
+            logger.error(f"Error processing task {uri}: {e}", exc_info=True)
         uri = get_one_open_task()
 
 
 def get_one_open_task() -> str | None:
-    operations = "\n".join(sparql_escape_uri(value) for value in TASK_OPERATIONS.values())
+    # Format VALUES clause properly - each URI on its own line, properly escaped
+    operations = "\n                ".join(sparql_escape_uri(value) for value in TASK_OPERATIONS.values())
     q = f"""
         {get_prefixes_for_query("task", "adms")}
         SELECT ?task WHERE {{
         GRAPH <{GRAPHS["jobs"]}> {{
-            VALUES ?targetOperations {
+            VALUES ?targetOperations {{
                 {operations}
-            }
+            }}
             ?task adms:status <{JOB_STATUSES["scheduled"]}> ;
                   task:operation ?targetOperations .
         }}
         }}
         limit 1
     """
-    results = query(q, sudo=True)
-    bindings = results.get("results", {}).get("bindings", [])
-    return bindings[0]["task"]["value"] if bindings else None
+    try:
+        results = query(q, sudo=True)
+        bindings = results.get("results", {}).get("bindings", [])
+        if bindings and "task" in bindings[0]:
+            return bindings[0]["task"]["value"]
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error querying for open tasks: {e}", exc_info=True)
+    return None
 
 
 @router.get("/task/operations")
