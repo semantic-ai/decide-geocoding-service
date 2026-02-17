@@ -447,22 +447,17 @@ class EntityExtractionTask(DecisionTask):
         work_uri = self.fetch_work_uri()
         graph_uri = self.source_graph or GRAPHS["ai"]
 
-        lang_uri = LANGUAGE_CODE_TO_URI.get("en")
-        if not lang_uri:
-            raise ValueError("Missing URI mapping for English language in LANGUAGE_CODE_TO_URI")
-
         realizes_triple = ""
         if work_uri:
             realizes_triple = f"{sparql_escape_uri(en_expr_uri)} eli:realizes {sparql_escape_uri(work_uri)} ."
 
         query_string = (
-            get_prefixes_for_query("eli", "epvoc", "dct") +
+            get_prefixes_for_query("eli", "epvoc") +
             f"""
             INSERT {{
               GRAPH <{graph_uri}> {{
                 {sparql_escape_uri(en_expr_uri)} a eli:Expression ;
-                    epvoc:expressionContent {sparql_escape_string(english_text)} ;
-                    dct:language {sparql_escape_uri(lang_uri)} .
+                    epvoc:expressionContent {sparql_escape_string(english_text)} .
                 {realizes_triple}
               }}
             }} WHERE {{
@@ -515,6 +510,9 @@ class EntityExtractionTask(DecisionTask):
 
         # Create an English eli:Expression node that realizes the same work
         english_expression_uri = self.create_english_expression(english_text)
+
+        # Annotate the English expression with its language (following diagram pattern)
+        self.create_language_relation(english_expression_uri, "en")
 
         # Extract title using LLM-based title extraction on the English text
         title_entities = extract_entities(english_text, language="en", method="title")
