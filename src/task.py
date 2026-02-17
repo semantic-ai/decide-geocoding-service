@@ -19,7 +19,7 @@ from .ner_functions import extract_entities
 from .config import get_config
 from .nominatim_geocoder import NominatimGeocoder
 from .annotation import GeoAnnotation, LinkingAnnotation, TripletAnnotation, NERAnnotation
-from .sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES, LANGUAGE_CODE_TO_URI
+from .sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES, LANGUAGE_CODE_TO_URI, LANGUAGE_URI_TO_CODE
 from .llm_models.llm_model_clients import OpenAIModel
 from .llm_models.llm_task_models import LlmTaskInput, EntityLinkingTaskOutput
 from .classifier.train import train
@@ -840,7 +840,7 @@ class TranslationTask(DecisionTask):
             LIMIT 1
             """).substitute(source=self.source)
         
-        result = query(query_string)
+        result = query(query_string, sudo=True)
         bindings = result.get("results", {}).get("bindings", [])
         language_uri = None
         if bindings and "language" in bindings[0] and "value" in bindings[0].get("language", {}):
@@ -874,49 +874,19 @@ class TranslationTask(DecisionTask):
             self.logger.error(f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
             return "nl"  # Default to Dutch for Belgian documents
     
-    def create_target_language_relation(self, translation_annotation_uri: str, target_language: str):
+    def create_language_relation(self, source_uri: str, language: str):
         """
-        Store the target language as an annotation of the translation annotation itself.
-        Uses eli:language predicate (same as EntityExtractionTask uses for source language).
-        
-        Args:
-            translation_annotation_uri: URI of the translation annotation to annotate
-            target_language: Target language code (must exist in LANGUAGE_CODE_TO_URI)
+        Create a language annotation for the source expression.
         """
-        lang_uri = LANGUAGE_CODE_TO_URI.get(target_language)
+        lang_uri = LANGUAGE_CODE_TO_URI.get(language)
         if not lang_uri:
-            error_msg = f"Unsupported target language '{target_language}' - cannot create language annotation"
+            error_msg = f"Unsupported language code '{language}' - cannot create language annotation"
             self.logger.error(error_msg)
             raise ValueError(error_msg)
         TripletAnnotation(
-            subject=translation_annotation_uri,
+            subject=source_uri,
             predicate="eli:language",
             obj=sparql_escape_uri(lang_uri),
-            activity_id=self.task_uri,
-            source_uri=translation_annotation_uri,
-            start=None,
-            end=None,
-            agent=AI_COMPONENTS["translator"],
-            agent_type=AGENT_TYPES["ai_component"]
-        ).add_to_triplestore()
-        self.logger.info(f"Stored target language annotation on translation annotation: {target_language}")
-    
-    def create_translation_relation(self, source_uri: str, translated_text: str, target_language: str):
-        """
-        Store the translated text as an annotation of the original expression.
-        Then create a language annotation that targets the translation annotation itself.
-        
-        Args:
-            source_uri: URI of the source expression being annotated
-            translated_text: The translated content (stored as string literal, like title)
-            target_language: Target language code
-        """
-        # Store translation text directly as annotation (same pattern as title)
-        # The text is stored as a string literal in rdf:object, just like title does
-        translation_annotation_uri = TripletAnnotation(
-            subject=self.source,
-            predicate="ex:hasTranslation",
-            obj=sparql_escape_string(translated_text),
             activity_id=self.task_uri,
             source_uri=source_uri,
             start=None,
@@ -924,17 +894,59 @@ class TranslationTask(DecisionTask):
             agent=AI_COMPONENTS["translator"],
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore()
+
+    def create_translated_expression(self, translated_text: str, target_language: str) -> str:
+        """
+        Create an eli:Expression resource for the translated text and
+        link it to the same work as the source expression when available.
         
-        # Normalize language code (lowercase) and verify it exists in our mapping
-        normalized_lang = target_language.lower()
-        if normalized_lang not in LANGUAGE_CODE_TO_URI:
-            error_msg = f"Unsupported target language '{target_language}' - cannot create language annotation"
-            self.logger.error(error_msg)
-            raise ValueError(error_msg)
-        # Create language annotation that targets the translation annotation itself
-        self.create_target_language_relation(translation_annotation_uri, normalized_lang)
+        Args:
+            translated_text: The translated content
+            target_language: Target language code (e.g., 'en', 'nl', 'de')
         
-        self.logger.info(f"Stored translation text as annotation (language: {target_language})")
+        Returns:
+            URI of the created translated expression
+        """
+        translated_expr_uri = f"http://example.org/{uuid4()}"
+        work_uri = self.fetch_work_uri()
+        graph_uri = self.source_graph or GRAPHS["ai"]
+
+        realizes_triple = ""
+        if work_uri:
+            realizes_triple = f"{sparql_escape_uri(translated_expr_uri)} eli:realizes {sparql_escape_uri(work_uri)} ."
+
+        query_string = (
+            get_prefixes_for_query("eli", "epvoc") +
+            f"""
+            INSERT {{
+              GRAPH <{graph_uri}> {{
+                {sparql_escape_uri(translated_expr_uri)} a eli:Expression ;
+                    epvoc:expressionContent {sparql_escape_string(translated_text)} .
+                {realizes_triple}
+              }}
+            }} WHERE {{
+            }}
+            """
+        )
+        query(query_string, sudo=True)
+
+        # Also create an annotated statement that "translated expression realizes work",
+        # targeting the original expression via oa:SpecificResource.
+        if work_uri:
+            TripletAnnotation(
+                subject=translated_expr_uri,
+                predicate="eli:realizes",
+                obj=sparql_escape_uri(work_uri),
+                activity_id=self.task_uri,
+                source_uri=self.source,
+                start=None,
+                end=None,
+                agent=AI_COMPONENTS["translator"],
+                agent_type=AGENT_TYPES["ai_component"],
+            ).add_to_triplestore()
+
+        self.logger.info(f"Created translated expression {translated_expr_uri} in graph {graph_uri} (language: {target_language})")
+        return translated_expr_uri
     
     def process(self):
         """
@@ -989,14 +1001,14 @@ class TranslationTask(DecisionTask):
         
         self.logger.info(f"Translation completed.")
         
-        # Store the translation as annotation (same pattern as title/language - text stored as string literal)
-        self.create_translation_relation(
-            self.source,
-            translated_text,
-            self.target_language
-        )
+        # Create a new eli:Expression for the translated text
+        normalized_target_lang = self.target_language.lower()
+        translated_expression_uri = self.create_translated_expression(translated_text, normalized_target_lang)
         
-        self.logger.info(f"Translation stored as annotation")
+        # Annotate the translated expression with its language 
+        self.create_language_relation(translated_expression_uri, normalized_target_lang)
+        
+        self.logger.info(f"Translation stored as new expression: {translated_expression_uri}")
 
 
 # SegmentationTask and its variants both follow the same pattern: fetch text, run segmentor, store spans as annotations.
