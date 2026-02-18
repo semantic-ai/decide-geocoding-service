@@ -35,6 +35,13 @@ class NerConfig(BaseModel):
         default=True,
         description="Whether to apply entity refinement to classify generic labels (DATE, LOCATION) into specific types"
     )
+    label_to_predicate: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Optional mapping from (refined) entity labels to RDF predicates (prefixed names, e.g. "
+            "'PUBLICATION_DATE' -> 'eli:date_publication'). Labels with missing/empty mappings are skipped."
+        ),
+    )
 
 
 class AppSettingsConfig(BaseModel):
@@ -182,6 +189,34 @@ class MLTrainingConfig(BaseModel):
     )
 
 
+class SegmentationConfig(BaseModel):
+    """Segmentation model configuration for document structure extraction."""
+    
+    model_name: str = Field(
+        default="gpt-4.1",
+        description="LLM deployment / model name"
+    )
+    api_key: SecretStr | None = Field(
+        default=None,
+        description="API key for the LLM endpoint"
+    )
+    endpoint: str | None = Field(
+        default=None,
+        description="API endpoint URL for the LLM service"
+    )
+    max_new_tokens: int = Field(
+        default=14000,
+        ge=100,
+        description="Maximum tokens to generate"
+    )
+    temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+        description="Generation temperature (lower = more deterministic)"
+    )
+
+
 class AppConfig(BaseModel):
     """Root application configuration model."""
     
@@ -209,6 +244,10 @@ class AppConfig(BaseModel):
     ml_training: MLTrainingConfig = Field(
         default_factory=MLTrainingConfig,
         description="Machine learning training configuration"
+    )
+    segmentation: SegmentationConfig = Field(
+        default_factory=SegmentationConfig,
+        description="Segmentation model configuration"
     )
 
 

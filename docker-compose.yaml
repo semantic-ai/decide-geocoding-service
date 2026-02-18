@@ -21,9 +21,8 @@ services:
     networks:
       - app-decide_default
     environment:
-      MU_SPARQL_ENDPOINT: http://app-decide-virtuoso-1:8890/sparql
-      EXPECTED_TASK_PREDICATE: 'http://www.w3.org/ns/adms#status'
-      EXPECTED_TASK_OBJECT: 'http://redpencil.data.gift/id/concept/JobStatus/scheduled'
+      MU_SPARQL_ENDPOINT: http://virtuoso:8890/sparql
+      ALLOW_MU_AUTH_SUDO: "true"
     volumes:
       - ./:/app
       - ./config.json:/app/config.json:ro  # Mount config as read-only

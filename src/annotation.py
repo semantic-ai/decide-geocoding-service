@@ -4,8 +4,8 @@ from abc import ABC, abstractmethod
 from string import Template
 import uuid
 
-from helpers import query
-from escape_helpers import sparql_escape_uri, sparql_escape_string, sparql_escape_float, sparql_escape_int
+from helpers import query, update
+from escape_helpers import sparql_escape_uri, sparql_escape_string, sparql_escape_float
 from .sparql_config import get_prefixes_for_query, GRAPHS, AGENT_TYPES
 
 
@@ -96,7 +96,8 @@ class LinkingAnnotation(Annotation):
         query_result = query(
             query_template.substitute(
                 uri=sparql_escape_uri(uri)
-            )
+            ),
+            sudo=True
         )
 
         if not query_result['results']['bindings']:
@@ -154,7 +155,7 @@ class LinkingAnnotation(Annotation):
             clz = sparql_escape_uri(self.class_uri)
         )
         try:
-            query(query_string)
+            update(query_string, sudo=True)
         except Exception as e:
             self.logger = logging.getLogger(self.__class__.__name__)
             error_msg = f"Failed to insert LinkingAnnotation to triplestore for source {self.source_uri}: {e}"
@@ -207,7 +208,8 @@ class NERAnnotation(Annotation):
         query_result = query(
             query_template.substitute(
                 uri=sparql_escape_uri(uri)
-            )
+            ),
+            sudo=True
         )
         for item in query_result['results']['bindings']:
             start_val = int(item['start']['value']) if item.get('start') else None
@@ -282,7 +284,7 @@ class NERAnnotation(Annotation):
         )
 
         try:
-            query(query_string)
+            update(query_string, sudo=True)
         except Exception as e:
             self.logger = logging.getLogger(self.__class__.__name__)
             error_msg = f"Failed to insert NERAnnotation to triplestore for source {self.source_uri}: {e}"
@@ -409,11 +411,12 @@ class GeoAnnotation(NERAnnotation):
 class TripletAnnotation(NERAnnotation):
     """NER annotation representing an RDF statement (subject-predicate-object triple)."""
     
-    def __init__(self, subject: str, predicate: str, obj: str, activity_id: str, source_uri: str, start: Optional[int], end: Optional[int], agent: str, agent_type: str):
+    def __init__(self, subject: str, predicate: str, obj: str, activity_id: str, source_uri: str, start: Optional[int], end: Optional[int], agent: str, agent_type: str, confidence: float = 1.0):
         super().__init__(activity_id, source_uri, predicate, start, end, agent, agent_type)
         self.predicate = predicate
         self.object = obj
         self.subject = subject
+        self.confidence = confidence
 
     def to_labelstudio_result(self) -> dict:
         return {}
@@ -454,7 +457,8 @@ class TripletAnnotation(NERAnnotation):
         query_result = query(
             query_template.substitute(
                 uri=sparql_escape_uri(uri)
-            )
+            ),
+            sudo=True
         )
         for item in query_result['results']['bindings']:
             start_val = int(item['start']['value']) if item.get('start') else None
@@ -488,7 +492,7 @@ class TripletAnnotation(NERAnnotation):
                   $annotation_id a oa:Annotation ;
                      mu:uuid "$id";
                      oa:hasBody $skolem ;
-                     nif:confidence 1 ;
+                     nif:confidence $confidence ;
                      oa:motivatedBy oa:linking ;
                      oa:hasTarget $part_of_id .
                                  
@@ -528,12 +532,13 @@ class TripletAnnotation(NERAnnotation):
             subject=sparql_escape_uri(self.subject),
             pred=self.predicate,  # Already escaped or prefixed name
             obj=self.object,  # Already escaped (string literal or URI)
+            confidence=sparql_escape_float(self.confidence),
             part_of_id=part_of_id,
             selector_part=selector_part,
             selector_filter=selector_filter
         )
         try:
-            query(query_string)
+            update(query_string, sudo=True)
         except Exception as e:
             self.logger = logging.getLogger(self.__class__.__name__)
             error_msg = f"Failed to insert TripletAnnotation to triplestore for subject {self.subject}: {e}"

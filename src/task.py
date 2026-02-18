@@ -2,14 +2,13 @@ import contextlib
 import logging
 import os
 import importlib
-import json
 import langdetect
 import random
 from abc import ABC, abstractmethod
 from typing import Optional, Any, Type
 
 from uuid import uuid4
-from helpers import query
+from helpers import query, update
 from string import Template
 from translatepy import Translator
 from escape_helpers import sparql_escape_uri, sparql_escape_string
@@ -66,7 +65,7 @@ class Task(ABC):
               FILTER(?task = $uri)
             }
         """).substitute(uri=sparql_escape_uri(task_uri))
-        for b in query(q).get('results').get('bindings'):
+        for b in query(q, sudo=True).get('results').get('bindings'):
             candidate_cls = cls.lookup(b['taskType']['value'])
             if candidate_cls is not None:
                 return candidate_cls(task_uri)
@@ -93,8 +92,11 @@ class Task(ABC):
             }
             WHERE {
             GRAPH <""" + GRAPHS["jobs"] + """> {
-                BIND($task AS ?task)
-                BIND(<$old_status> AS ?oldStatus)
+                VALUES ?task {
+                  $task
+                }
+                ?task a ?thing .
+                
                 OPTIONAL { ?task adms:status ?oldStatus . }
             }
             }
@@ -106,11 +108,10 @@ class Task(ABC):
 
         query_string = query_template.substitute(
             new_status=JOB_STATUSES[new_state],
-            old_status=JOB_STATUSES[old_state],
             task=sparql_escape_uri(self.task_uri),
             results_container_line=results_container_line)
 
-        query(query_string)
+        update(query_string, sudo=True)
 
     @contextlib.contextmanager
     def run(self):
@@ -143,12 +144,15 @@ class DecisionTask(Task, ABC):
     
     def __init__(self, task_uri: str):
         super().__init__(task_uri)
+        self.source_graph: Optional[str] = None
 
         q = Template(
             get_prefixes_for_query("dct", "task", "nfo") +
             """
         SELECT ?source WHERE {
-          BIND($task AS ?t)
+          VALUES ?t {
+            $task
+          }
           ?t a task:Task .
           OPTIONAL { 
             ?t task:inputContainer ?ic . 
@@ -156,7 +160,7 @@ class DecisionTask(Task, ABC):
           }
         }
         """).substitute(task=sparql_escape_uri(task_uri))
-        r = query(q)
+        r = query(q, sudo=True)
         bindings = r.get("results", {}).get("bindings", [])
         if not bindings or "source" not in bindings[0] or "value" not in bindings[0].get("source", {}):
             raise ValueError(f"No source found for task {task_uri}")
@@ -167,10 +171,13 @@ class DecisionTask(Task, ABC):
         query_template = Template(
             get_prefixes_for_query("eli", "eli-dl", "dct", "epvoc") +
             """
-            SELECT ?graph ?title ?description ?decision_basis ?content ?lang
+            SELECT DISTINCT ?graph ?title ?description ?decision_basis ?content ?lang
             WHERE {
               GRAPH ?graph {
-                BIND($source AS ?s)
+                VALUES ?s {
+                  $source
+                }
+                ?s a ?thing .
                 OPTIONAL { ?s eli:title ?title }
                 OPTIONAL { ?s eli:description ?description }
                 OPTIONAL { ?s eli-dl:decision_basis ?decision_basis }
@@ -182,12 +189,15 @@ class DecisionTask(Task, ABC):
 
         query_result = query(query_template.substitute(
             source=sparql_escape_uri(self.source)
-        ))
+        ), sudo=True)
 
         bindings = query_result.get("results", {}).get("bindings", [])
         texts: list[str] = []
         seen = set()
         for binding in bindings:
+            # Cache the graph of the source expression so we can reuse it later
+            if not self.source_graph:
+                self.source_graph = binding.get("graph", {}).get("value")
             for field in ("content", "title", "description", "decision_basis"):
                 value = binding.get(field, {}).get("value")
                 if value and value not in seen:
@@ -195,6 +205,35 @@ class DecisionTask(Task, ABC):
                     seen.add(value)
 
         return "\n".join(texts)
+
+    def fetch_work_uri(self) -> Optional[str]:
+        """
+        Retrieve the eli:work realized by this expression, if available.
+        """
+        query_template = Template(
+            get_prefixes_for_query("eli") +
+            """
+            SELECT ?work WHERE {
+              GRAPH ?g {
+                $source eli:realizes ?work .
+              }
+            }
+            LIMIT 1
+            """
+        )
+
+        query_result = query(
+            query_template.substitute(source=sparql_escape_uri(self.source)),
+            sudo=True
+        )
+        bindings = query_result.get("results", {}).get("bindings", [])
+        if bindings and "work" in bindings[0]:
+            work_uri = bindings[0]["work"]["value"]
+            self.logger.info(f"Found work {work_uri} for expression {self.source}")
+            return work_uri
+
+        self.logger.warning(f"No eli:realizes work found for expression {self.source}")
+        return None
 
 
 class GeoExtractionTask(DecisionTask):
@@ -254,6 +293,43 @@ class EntityExtractionTask(DecisionTask):
 
     __task_type__ = TASK_OPERATIONS["entity_extraction"]
 
+    # Shared translator instance for all entity extraction tasks
+    _translator: Optional[Translator] = None
+
+    @classmethod
+    def get_translator(cls) -> Translator:
+        """
+        Lazily construct a translatepy Translator based on config.translation.provider.
+        This reuses the same mechanism that was previously used by TranslationTask.
+        """
+        if cls._translator is None:
+            config = get_config()
+            provider = config.translation.provider.lower()
+
+            if provider == "auto":
+                cls._translator = Translator()
+            else:
+                registry = {
+                    "google": ("translatepy.translators.google", "GoogleTranslate", True),
+                    "microsoft": ("translatepy.translators.microsoft", "MicrosoftTranslate", True),
+                    "deepl": ("translatepy.translators.deepl", "DeeplTranslate", True),
+                    "libre": ("translatepy.translators.libre", "LibreTranslate", True),
+                    "huggingface": ("translation_plugin_huggingface", "HuggingFaceTranslateService", False),
+                    "etranslation": ("translation_plugin_etranslation", "ETRanslationService", False),
+                    "gemma": ("translation_plugin_gemma", "GemmaTranslateService", False),
+                }
+
+                module_name, class_name, is_external = registry.get(provider, registry.get("huggingface"))
+                base_package = __package__ or "src"
+                module_path = module_name if is_external else f"{base_package}.{module_name}"
+
+                module = importlib.import_module(module_path)
+                service_cls = getattr(module, class_name)
+                service = service_cls()
+                cls._translator = Translator(services_list=[service])
+
+        return cls._translator
+
     def create_language_relation(self, source_uri: str, language: str):
         """
         Create a language annotation for the source.
@@ -268,7 +344,7 @@ class EntityExtractionTask(DecisionTask):
             self.logger.error(error_msg)
             raise ValueError(error_msg)
         TripletAnnotation(
-            subject=self.source,
+            subject=source_uri,
             predicate="eli:language",
             obj=sparql_escape_uri(lang_uri),
             activity_id=self.task_uri,
@@ -283,8 +359,8 @@ class EntityExtractionTask(DecisionTask):
         for entity in entities:
             if entity['label'] == 'TITLE':
                 TripletAnnotation(
-                    subject=self.source,
-                    predicate="dct:title",
+                    subject=source_uri,
+                    predicate="eli:title",
                     obj=sparql_escape_string(entity['text']),
                     activity_id=self.task_uri,
                     source_uri=source_uri,
@@ -296,20 +372,33 @@ class EntityExtractionTask(DecisionTask):
                 self.logger.info(f"Created Title triplet suggestion for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
 
     def create_general_entity_annotations(self, source_uri: str, entities: list[dict[str, Any]]):
-        """Create annotations for general entities (DATE, PERSON, ORG, etc.)"""
+        """
+        Create triplet suggestions for entities by mapping (refined) labels to RDF predicates.
+        
+        Only entities with a configured mapping are saved. If a label is unmapped
+        (or mapped to an empty string), the entity is skipped.
+        """
+        config = get_config()
+        label_to_predicate = config.ner.label_to_predicate or {}
+
         for entity in entities:
-            NERAnnotation(
+            label = str(entity.get("label", "")).upper()
+            predicate = (label_to_predicate.get(label) or "").strip()
+            if not predicate:
+                continue
+
+            TripletAnnotation(
+                subject=source_uri,
+                predicate=predicate,
+                obj=sparql_escape_string(entity["text"]),
                 activity_id=self.task_uri,
                 source_uri=source_uri,
-                class_uri=entity['label'],
-                start=entity['start'],
-                end=entity['end'],
+                start=entity.get("start"),
+                end=entity.get("end"),
                 agent=AI_COMPONENTS["ner_extractor"],
                 agent_type=AGENT_TYPES["ai_component"],
-                confidence=entity.get('confidence', 1.0)
+                confidence=entity.get("confidence", 1.0),
             ).add_to_triplestore()
-            confidence_str = f" (confidence: {entity.get('confidence', 1.0):.2f})" if 'confidence' in entity else ""
-            self.logger.info(f"Created NER annotation for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]{confidence_str}")
 
     def extract_general_entities(self, task_data: str, language: str = None, method: str = None) -> list[dict[str, Any]]:
         """
@@ -334,30 +423,105 @@ class EntityExtractionTask(DecisionTask):
 
         return entities
 
+    def translate_to_english(self, text: str, source_language: str) -> str:
+        """
+        Translate arbitrary source text to English using translatepy,
+        configured via config.translation.*.
+        """
+        config = get_config()
+        translator = self.get_translator()
+        self.logger.info(f"Translating source text from {source_language} to en for NER")
+        translation_result = translator.translate(
+            text,
+            destination_language="en",
+            source_language=source_language or "auto",
+        )
+        self.logger.info(f"Translation service used for NER: {translation_result.service}")
+        return translation_result.result
+
+    def create_english_expression(self, english_text: str) -> str:
+        """
+        Create an English eli:Expression resource for the translated text and
+        link it to the same work as the source expression when available.
+        """
+        en_expr_uri = f"http://example.org/{uuid4()}"
+        work_uri = self.fetch_work_uri()
+        graph_uri = self.source_graph or GRAPHS["ai"]
+
+        realizes_triple = ""
+        if work_uri:
+            realizes_triple = f"{sparql_escape_uri(en_expr_uri)} eli:realizes {sparql_escape_uri(work_uri)} ."
+
+        query_string = (
+            get_prefixes_for_query("eli", "epvoc") +
+            f"""
+            INSERT {{
+              GRAPH <{graph_uri}> {{
+                {sparql_escape_uri(en_expr_uri)} a eli:Expression ;
+                    epvoc:expressionContent {sparql_escape_string(english_text)} .
+                {realizes_triple}
+              }}
+            }} WHERE {{
+            }}
+            """
+        )
+        update(query_string, sudo=True)
+
+        # Also create an annotated statement that "EN expression realizes work",
+        # targeting the original (NL) expression via oa:SpecificResource, as in the diagram.
+        if work_uri:
+            TripletAnnotation(
+                subject=en_expr_uri,
+                predicate="eli:realizes",
+                obj=sparql_escape_uri(work_uri),
+                activity_id=self.task_uri,
+                source_uri=self.source,
+                start=None,
+                end=None,
+                agent=AI_COMPONENTS["ner_extractor"],
+                agent_type=AGENT_TYPES["ai_component"],
+            ).add_to_triplestore()
+
+        self.logger.info(f"Created English expression {en_expr_uri} in graph {graph_uri}")
+        return en_expr_uri
+
     def process(self):
-        eli_expression = self.fetch_data()
-        self.logger.info(eli_expression)
+        original_text = self.fetch_data()
+        self.logger.info(original_text)
 
         # whitespace-only content can crash langdetect
-        if not eli_expression or not eli_expression.strip():
+        if not original_text or not original_text.strip():
             self.logger.warning("No content available for language detection; skipping language annotation")
             return
 
         try:
-            language = langdetect.detect(eli_expression)
+            source_language = langdetect.detect(original_text)
         except Exception as e:
             self.logger.warning(f"Language detection failed ({e}); defaulting to 'en'")
-            language = "en"
+            source_language = "en"
 
-        self.create_language_relation(self.source, language)
+        # Always annotate the original expression with its detected language
+        self.create_language_relation(self.source, source_language)
 
-        # Extract title using LLM-based title extraction
-        title_entities = extract_entities(eli_expression, language=language, method='title')
-        self.create_title_relation(self.source, title_entities)
-        
-        # Extract general entities (DATE, etc.) - uses config.ner.method from config.json
-        general_entities = self.extract_general_entities(eli_expression, language=language)
-        self.create_general_entity_annotations(self.source, general_entities)
+        # Ensure we have English text for NER
+        if source_language.lower() == "en":
+            english_text = original_text
+        else:
+            english_text = self.translate_to_english(original_text, source_language)
+
+        # Create an English eli:Expression node that realizes the same work
+        english_expression_uri = self.create_english_expression(english_text)
+
+        # Annotate the English expression with its language (following diagram pattern)
+        self.create_language_relation(english_expression_uri, "en")
+
+        # Extract title using LLM-based title extraction on the English text
+        title_entities = extract_entities(english_text, language="en", method="title")
+        self.create_title_relation(english_expression_uri, title_entities)
+
+        # Extract general entities (DATE, etc.) on the English text
+        general_entities = self.extract_general_entities(english_text, language="en")
+        self.create_general_entity_annotations(english_expression_uri, general_entities)
 
 
 class ModelAnnotatingTask(DecisionTask):
@@ -486,7 +650,7 @@ class ModelBatchAnnotatingTask(Task, ABC):
         }
         """
 
-        response = query(q)
+        response = query(q, sudo=True)
         bindings = response.get("results", {}).get("bindings", [])
         decision_uris = [b["s"]["value"] for b in bindings if "s" in b]
 
@@ -579,7 +743,7 @@ class ClassifierTrainingTask(Task, ABC):
         }
         """
 
-        res = query(q)
+        res = query(q, sudo=True)
         bindings = res.get("results", {}).get("bindings", [])
 
         results = []
@@ -677,7 +841,7 @@ class TranslationTask(DecisionTask):
             LIMIT 1
             """).substitute(source=self.source)
         
-        result = query(query_string)
+        result = query(query_string, sudo=True)
         bindings = result.get("results", {}).get("bindings", [])
         language_uri = None
         if bindings and "language" in bindings[0] and "value" in bindings[0].get("language", {}):
@@ -711,49 +875,19 @@ class TranslationTask(DecisionTask):
             self.logger.error(f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
             return "nl"  # Default to Dutch for Belgian documents
     
-    def create_target_language_relation(self, translation_annotation_uri: str, target_language: str):
+    def create_language_relation(self, source_uri: str, language: str):
         """
-        Store the target language as an annotation of the translation annotation itself.
-        Uses eli:language predicate (same as EntityExtractionTask uses for source language).
-        
-        Args:
-            translation_annotation_uri: URI of the translation annotation to annotate
-            target_language: Target language code (must exist in LANGUAGE_CODE_TO_URI)
+        Create a language annotation for the source expression.
         """
-        lang_uri = LANGUAGE_CODE_TO_URI.get(target_language)
+        lang_uri = LANGUAGE_CODE_TO_URI.get(language)
         if not lang_uri:
-            error_msg = f"Unsupported target language '{target_language}' - cannot create language annotation"
+            error_msg = f"Unsupported language code '{language}' - cannot create language annotation"
             self.logger.error(error_msg)
             raise ValueError(error_msg)
         TripletAnnotation(
-            subject=translation_annotation_uri,
+            subject=source_uri,
             predicate="eli:language",
             obj=sparql_escape_uri(lang_uri),
-            activity_id=self.task_uri,
-            source_uri=translation_annotation_uri,
-            start=None,
-            end=None,
-            agent=AI_COMPONENTS["translator"],
-            agent_type=AGENT_TYPES["ai_component"]
-        ).add_to_triplestore()
-        self.logger.info(f"Stored target language annotation on translation annotation: {target_language}")
-    
-    def create_translation_relation(self, source_uri: str, translated_text: str, target_language: str):
-        """
-        Store the translated text as an annotation of the original expression.
-        Then create a language annotation that targets the translation annotation itself.
-        
-        Args:
-            source_uri: URI of the source expression being annotated
-            translated_text: The translated content (stored as string literal, like title)
-            target_language: Target language code
-        """
-        # Store translation text directly as annotation (same pattern as title)
-        # The text is stored as a string literal in rdf:object, just like title does
-        translation_annotation_uri = TripletAnnotation(
-            subject=self.source,
-            predicate="ex:hasTranslation",
-            obj=sparql_escape_string(translated_text),
             activity_id=self.task_uri,
             source_uri=source_uri,
             start=None,
@@ -761,17 +895,59 @@ class TranslationTask(DecisionTask):
             agent=AI_COMPONENTS["translator"],
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore()
+
+    def create_translated_expression(self, translated_text: str, target_language: str) -> str:
+        """
+        Create an eli:Expression resource for the translated text and
+        link it to the same work as the source expression when available.
         
-        # Normalize language code (lowercase) and verify it exists in our mapping
-        normalized_lang = target_language.lower()
-        if normalized_lang not in LANGUAGE_CODE_TO_URI:
-            error_msg = f"Unsupported target language '{target_language}' - cannot create language annotation"
-            self.logger.error(error_msg)
-            raise ValueError(error_msg)
-        # Create language annotation that targets the translation annotation itself
-        self.create_target_language_relation(translation_annotation_uri, normalized_lang)
+        Args:
+            translated_text: The translated content
+            target_language: Target language code (e.g., 'en', 'nl', 'de')
         
-        self.logger.info(f"Stored translation text as annotation (language: {target_language})")
+        Returns:
+            URI of the created translated expression
+        """
+        translated_expr_uri = f"http://example.org/{uuid4()}"
+        work_uri = self.fetch_work_uri()
+        graph_uri = self.source_graph or GRAPHS["ai"]
+
+        realizes_triple = ""
+        if work_uri:
+            realizes_triple = f"{sparql_escape_uri(translated_expr_uri)} eli:realizes {sparql_escape_uri(work_uri)} ."
+
+        query_string = (
+            get_prefixes_for_query("eli", "epvoc") +
+            f"""
+            INSERT {{
+              GRAPH <{graph_uri}> {{
+                {sparql_escape_uri(translated_expr_uri)} a eli:Expression ;
+                    epvoc:expressionContent {sparql_escape_string(translated_text)} .
+                {realizes_triple}
+              }}
+            }} WHERE {{
+            }}
+            """
+        )
+        update(query_string, sudo=True)
+
+        # Also create an annotated statement that "translated expression realizes work",
+        # targeting the original expression via oa:SpecificResource.
+        if work_uri:
+            TripletAnnotation(
+                subject=translated_expr_uri,
+                predicate="eli:realizes",
+                obj=sparql_escape_uri(work_uri),
+                activity_id=self.task_uri,
+                source_uri=self.source,
+                start=None,
+                end=None,
+                agent=AI_COMPONENTS["translator"],
+                agent_type=AGENT_TYPES["ai_component"],
+            ).add_to_triplestore()
+
+        self.logger.info(f"Created translated expression {translated_expr_uri} in graph {graph_uri} (language: {target_language})")
+        return translated_expr_uri
     
     def process(self):
         """
@@ -826,11 +1002,197 @@ class TranslationTask(DecisionTask):
         
         self.logger.info(f"Translation completed.")
         
-        # Store the translation as annotation (same pattern as title/language - text stored as string literal)
-        self.create_translation_relation(
-            self.source,
-            translated_text,
-            self.target_language
+        # Create a new eli:Expression for the translated text
+        normalized_target_lang = self.target_language.lower()
+        translated_expression_uri = self.create_translated_expression(translated_text, normalized_target_lang)
+        
+        # Annotate the translated expression with its language 
+        self.create_language_relation(translated_expression_uri, normalized_target_lang)
+        
+        self.logger.info(f"Translation stored as new expression: {translated_expression_uri}")
+
+
+# SegmentationTask and its variants both follow the same pattern: fetch text, run segmentor, store spans as annotations.
+class SegmentationTask(DecisionTask):
+    """Run the marked segmentation model and store segment spans as annotations."""
+    
+    __task_type__ = TASK_OPERATIONS["segmentation"]
+    
+    def fetch_english_expression_uri(self) -> Optional[str]:
+        """
+        Find the English expression that realizes the same work as the source expression.
+        Returns the URI of the English expression if found, None otherwise.
+        """
+        work_uri = self.fetch_work_uri()
+        if not work_uri:
+            self.logger.info(f"No work found for expression {self.source}, cannot find English translation")
+            return None
+        
+        # Get English language URI
+        en_lang_uri = LANGUAGE_CODE_TO_URI.get("en")
+        if not en_lang_uri:
+            self.logger.warning("English language URI not found in LANGUAGE_CODE_TO_URI")
+            return None
+        
+        # Query for English expression that realizes the same work
+        # Check via language annotation (since we use TripletAnnotation for language, not dct:language)
+        query_template = Template(
+            get_prefixes_for_query("eli", "rdf", "oa") +
+            """
+            SELECT DISTINCT ?en_expr WHERE {
+              # Find expressions that realize the work
+              GRAPH ?g {
+                ?en_expr a eli:Expression ;
+                  eli:realizes $work .
+              }
+              # And have English language annotation
+              GRAPH <""" + GRAPHS["ai"] + """> {
+                ?ann oa:hasBody ?stmt .
+                ?stmt a rdf:Statement ;
+                  rdf:subject ?en_expr ;
+                  rdf:predicate eli:language ;
+                  rdf:object $en_lang .
+              }
+            }
+            LIMIT 1
+            """
         )
         
-        self.logger.info(f"Translation stored as annotation")
+        query_result = query(
+            query_template.substitute(
+                work=sparql_escape_uri(work_uri),
+                en_lang=sparql_escape_uri(en_lang_uri)
+            ),
+            sudo=True
+        )
+        
+        bindings = query_result.get("results", {}).get("bindings", [])
+        if bindings and "en_expr" in bindings[0]:
+            en_expr_uri = bindings[0]["en_expr"]["value"]
+            self.logger.info(f"Found English expression {en_expr_uri} for work {work_uri}")
+            return en_expr_uri
+        
+        self.logger.info(f"No English expression found for work {work_uri}")
+        return None
+    
+    def fetch_expression_data(self, expression_uri: str) -> str:
+        """
+        Retrieve the text content from a specific expression URI.
+        Similar to fetch_data() but for a specific expression.
+        """
+        query_template = Template(
+            get_prefixes_for_query("eli", "eli-dl", "dct", "epvoc") +
+            """
+            SELECT DISTINCT ?title ?description ?decision_basis ?content
+            WHERE {
+              GRAPH ?graph {
+                VALUES ?s {
+                  $expression
+                }
+                OPTIONAL { ?s eli:title ?title }
+                OPTIONAL { ?s eli:description ?description }
+                OPTIONAL { ?s eli-dl:decision_basis ?decision_basis }
+                OPTIONAL { ?s epvoc:expressionContent ?content }
+              }
+            }
+        """)
+
+        query_result = query(
+            query_template.substitute(expression=sparql_escape_uri(expression_uri)),
+            sudo=True
+        )
+
+        bindings = query_result.get("results", {}).get("bindings", [])
+        texts: list[str] = []
+        seen = set()
+        for binding in bindings:
+            for field in ("content", "title", "description", "decision_basis"):
+                value = binding.get(field, {}).get("value")
+                if value and value not in seen:
+                    texts.append(value)
+                    seen.add(value)
+
+        return "\n".join(texts)
+    
+    def _create_segmentor(self):
+        """Create a Segmentor configured from app config."""
+        from .library.segmentors import GemmaSegmentor, LLMSegmentor
+        seg_config = get_config().segmentation
+        api_key = seg_config.api_key.get_secret_value() if seg_config.api_key else None
+
+        if seg_config.model_name == "wdmuer/decide-marked-segmentation":
+            return GemmaSegmentor(
+                api_key=api_key,
+                endpoint=seg_config.endpoint,
+                model_name=seg_config.model_name,
+                temperature=seg_config.temperature,
+                max_new_tokens=seg_config.max_new_tokens,
+            )
+        else:
+            return LLMSegmentor(
+                api_key=api_key,
+                endpoint=seg_config.endpoint,
+                model_name=seg_config.model_name,
+                temperature=seg_config.temperature,
+                max_new_tokens=seg_config.max_new_tokens,
+            )
+    
+    def create_segment_annotations(self, source_uri: str, segments: list[dict[str, Any]]):
+        """
+        Store segment spans as TripletAnnotation.
+        Creates rdf:Statement with subject=expression, predicate=segment_type, object=segment_text.
+        """
+        for segment in segments:
+            segment_label = segment.get('label', 'UNKNOWN')
+            segment_text = segment.get('text', '')
+            
+            # Use segment label as predicate (e.g., "ex:TITLE", "ex:PARTICIPANTS")
+            # Convert to proper predicate format
+            predicate = f"ex:{segment_label}"
+            
+            TripletAnnotation(
+                subject=source_uri,
+                predicate=predicate,
+                obj=sparql_escape_string(segment_text),
+                activity_id=self.task_uri,
+                source_uri=source_uri,
+                start=segment.get('start'),
+                end=segment.get('end'),
+                agent=AI_COMPONENTS["segmenter"],
+                agent_type=AGENT_TYPES["ai_component"],
+                confidence=1.0
+            ).add_to_triplestore()
+            self.logger.info(f"Created segment annotation for '{segment_label}' at [{segment.get('start')}:{segment.get('end')}] with text: '{segment_text[:50]}...'")
+    
+    def process(self):
+        """
+        Fetch English text through original expression (if translation available),
+        run the segmentor, and save annotations on the English expression.
+        """
+        self.logger.info(f"Processing segmentation for {self.source}")
+        
+        # Try to find English expression that realizes the same work
+        english_expression_uri = self.fetch_english_expression_uri()
+        
+        if english_expression_uri:
+            # Use English expression for segmentation
+            self.logger.info(f"Found English expression {english_expression_uri}, using it for segmentation")
+            task_data = self.fetch_expression_data(english_expression_uri)
+            target_expression_uri = english_expression_uri
+        else:
+            # Fallback to original expression if no English translation available
+            self.logger.info(f"No English expression found, using original expression {self.source}")
+            task_data = self.fetch_data()
+            target_expression_uri = self.source
+        
+        if not task_data or not task_data.strip():
+            self.logger.warning("No content available for segmentation")
+            return
+        
+        segmentor = self._create_segmentor()
+        segments = segmentor.segment(task_data)
+        self.logger.info(f"Segmentor returned {len(segments)} segments")
+        
+        # Save annotations on the target expression (English if available, otherwise original)
+        self.create_segment_annotations(target_expression_uri, segments)
+
