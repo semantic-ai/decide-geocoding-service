@@ -10,6 +10,8 @@ flair
 transformers
 tokenizers
 peft
+accelerate
+bitsandbytes
 langdetect
 fire
 datasets
@@ -20,5 +22,6 @@ fastapi
 pydantic>=2.0.0
 SPARQLWrapper
 translatepy
+span-aligner
 #tokenizers==0.22.1
 #scikit-learn

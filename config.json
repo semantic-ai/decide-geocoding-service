@@ -55,5 +55,12 @@
     "weight_decay": 0.01,
     "huggingface_token": null,
     "huggingface_output_model_id": null
+  },
+  "segmentation": {
+    "model_name": "gpt-4.1",
+    "api_key": "<API_KEY>",
+    "endpoint": "<ENDPOINT_URL>",
+    "max_new_tokens": 14000,
+    "temperature": 0.1
   }
 }
