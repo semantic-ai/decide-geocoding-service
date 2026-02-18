@@ -86,6 +86,7 @@ TASK_OPERATIONS = {
     "classifier_training": "http://lblod.data.gift/id/jobs/concept/TaskOperation/classifier-training",
     "geo_extraction": "http://lblod.data.gift/id/jobs/concept/TaskOperation/geo-extracting",
     "translation": "http://lblod.data.gift/id/jobs/concept/TaskOperation/translating",
+    "segmentation": "http://lblod.data.gift/id/jobs/concept/TaskOperation/segmenting",
 }
 
 # ==============================================================================
@@ -106,6 +107,7 @@ AI_COMPONENTS = {
     "model_annotater": "http://example.org/model_annotation",
     "decide_system": "http://example.org/DECIDe",
     "translator": "http://example.org/translation",
+    "segmenter": "http://example.org/segmentation",
 }
 
 # ==============================================================================
