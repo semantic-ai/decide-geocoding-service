@@ -11,6 +11,4 @@ RUN uv pip install https://github.com/explosion/spacy-models/releases/download/e
 
 RUN uv pip install transformers==4.57.1
 
-ENV EXPECTED_TASK_PREDICATE=http://www.w3.org/ns/adms#status
-ENV EXPECTED_TASK_OBJECT=http://redpencil.data.gift/id/concept/JobStatus/scheduled
 ENV BASE_REGISTRY_URI=https://api.basisregisters.vlaanderen.be

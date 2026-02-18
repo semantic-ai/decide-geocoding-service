@@ -1,4 +1,3 @@
-import os
 import json
 import logging
 import time
@@ -12,7 +11,6 @@ from escape_helpers import sparql_escape_uri
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from pydantic import BaseModel
-from typing import Literal
 
 
 @app.on_event("startup")
@@ -23,14 +21,6 @@ async def startup_event():
 
 
 router = APIRouter()
-
-class ExpectedTaskPredicateValue(BaseModel):
-    value: Literal[os.getenv("EXPECTED_TASK_PREDICATE")]
-
-
-class ExpectedTaskObjectValue(BaseModel):
-    value: Literal[os.getenv("EXPECTED_TASK_OBJECT")]
-
 
 class NotificationResponse(BaseModel):
     status: str
