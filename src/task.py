@@ -293,43 +293,6 @@ class EntityExtractionTask(DecisionTask):
 
     __task_type__ = TASK_OPERATIONS["entity_extraction"]
 
-    # Shared translator instance for all entity extraction tasks
-    _translator: Optional[Translator] = None
-
-    @classmethod
-    def get_translator(cls) -> Translator:
-        """
-        Lazily construct a translatepy Translator based on config.translation.provider.
-        This reuses the same mechanism that was previously used by TranslationTask.
-        """
-        if cls._translator is None:
-            config = get_config()
-            provider = config.translation.provider.lower()
-
-            if provider == "auto":
-                cls._translator = Translator()
-            else:
-                registry = {
-                    "google": ("translatepy.translators.google", "GoogleTranslate", True),
-                    "microsoft": ("translatepy.translators.microsoft", "MicrosoftTranslate", True),
-                    "deepl": ("translatepy.translators.deepl", "DeeplTranslate", True),
-                    "libre": ("translatepy.translators.libre", "LibreTranslate", True),
-                    "huggingface": ("translation_plugin_huggingface", "HuggingFaceTranslateService", False),
-                    "etranslation": ("translation_plugin_etranslation", "ETRanslationService", False),
-                    "gemma": ("translation_plugin_gemma", "GemmaTranslateService", False),
-                }
-
-                module_name, class_name, is_external = registry.get(provider, registry.get("huggingface"))
-                base_package = __package__ or "src"
-                module_path = module_name if is_external else f"{base_package}.{module_name}"
-
-                module = importlib.import_module(module_path)
-                service_cls = getattr(module, class_name)
-                service = service_cls()
-                cls._translator = Translator(services_list=[service])
-
-        return cls._translator
-
     def create_language_relation(self, source_uri: str, language: str):
         """
         Create a language annotation for the source.
@@ -423,105 +386,134 @@ class EntityExtractionTask(DecisionTask):
 
         return entities
 
-    def translate_to_english(self, text: str, source_language: str) -> str:
+    def fetch_english_expression_uri(self) -> Optional[str]:
         """
-        Translate arbitrary source text to English using translatepy,
-        configured via config.translation.*.
+        Find the English expression that realizes the same work as the source expression.
+        Returns the URI of the English expression if found, None otherwise.
         """
-        config = get_config()
-        translator = self.get_translator()
-        self.logger.info(f"Translating source text from {source_language} to en for NER")
-        translation_result = translator.translate(
-            text,
-            destination_language="en",
-            source_language=source_language or "auto",
-        )
-        self.logger.info(f"Translation service used for NER: {translation_result.service}")
-        return translation_result.result
-
-    def create_english_expression(self, english_text: str) -> str:
-        """
-        Create an English eli:Expression resource for the translated text and
-        link it to the same work as the source expression when available.
-        """
-        en_expr_uri = f"http://example.org/{uuid4()}"
         work_uri = self.fetch_work_uri()
-        graph_uri = self.source_graph or GRAPHS["ai"]
-
-        realizes_triple = ""
-        if work_uri:
-            realizes_triple = f"{sparql_escape_uri(en_expr_uri)} eli:realizes {sparql_escape_uri(work_uri)} ."
-
-        query_string = (
-            get_prefixes_for_query("eli", "epvoc") +
-            f"""
-            INSERT {{
-              GRAPH <{graph_uri}> {{
-                {sparql_escape_uri(en_expr_uri)} a eli:Expression ;
-                    epvoc:expressionContent {sparql_escape_string(english_text)} .
-                {realizes_triple}
-              }}
-            }} WHERE {{
-            }}
+        if not work_uri:
+            self.logger.info(f"No work found for expression {self.source}, cannot find English translation")
+            return None
+        
+        # Get English language URI
+        en_lang_uri = LANGUAGE_CODE_TO_URI.get("en")
+        if not en_lang_uri:
+            self.logger.warning("English language URI not found in LANGUAGE_CODE_TO_URI")
+            return None
+        
+        # Query for English expression that realizes the same work
+        # Check via language annotation (since we use TripletAnnotation for language, not dct:language)
+        query_template = Template(
+            get_prefixes_for_query("eli", "rdf", "oa") +
+            """
+            SELECT DISTINCT ?en_expr WHERE {
+              # Find expressions that realize the work
+              GRAPH ?g {
+                ?en_expr a eli:Expression ;
+                  eli:realizes $work .
+              }
+              # And have English language annotation
+              GRAPH <""" + GRAPHS["ai"] + """> {
+                ?ann oa:hasBody ?stmt .
+                ?stmt a rdf:Statement ;
+                  rdf:subject ?en_expr ;
+                  rdf:predicate eli:language ;
+                  rdf:object $en_lang .
+              }
+            }
+            LIMIT 1
             """
         )
-        update(query_string, sudo=True)
+        
+        query_result = query(
+            query_template.substitute(
+                work=sparql_escape_uri(work_uri),
+                en_lang=sparql_escape_uri(en_lang_uri)
+            ),
+            sudo=True
+        )
+        
+        bindings = query_result.get("results", {}).get("bindings", [])
+        if bindings and "en_expr" in bindings[0]:
+            en_expr_uri = bindings[0]["en_expr"]["value"]
+            self.logger.info(f"Found English expression {en_expr_uri} for work {work_uri}")
+            return en_expr_uri
+        
+        self.logger.info(f"No English expression found for work {work_uri}")
+        return None
+    
+    def fetch_expression_data(self, expression_uri: str) -> str:
+        """
+        Retrieve the text content from a specific expression URI.
+        Similar to fetch_data() but for a specific expression.
+        """
+        query_template = Template(
+            get_prefixes_for_query("eli", "eli-dl", "dct", "epvoc") +
+            """
+            SELECT DISTINCT ?title ?description ?decision_basis ?content
+            WHERE {
+              GRAPH ?graph {
+                VALUES ?s {
+                  $expression
+                }
+                OPTIONAL { ?s eli:title ?title }
+                OPTIONAL { ?s eli:description ?description }
+                OPTIONAL { ?s eli-dl:decision_basis ?decision_basis }
+                OPTIONAL { ?s epvoc:expressionContent ?content }
+              }
+            }
+        """)
 
-        # Also create an annotated statement that "EN expression realizes work",
-        # targeting the original (NL) expression via oa:SpecificResource, as in the diagram.
-        if work_uri:
-            TripletAnnotation(
-                subject=en_expr_uri,
-                predicate="eli:realizes",
-                obj=sparql_escape_uri(work_uri),
-                activity_id=self.task_uri,
-                source_uri=self.source,
-                start=None,
-                end=None,
-                agent=AI_COMPONENTS["ner_extractor"],
-                agent_type=AGENT_TYPES["ai_component"],
-            ).add_to_triplestore()
+        query_result = query(
+            query_template.substitute(expression=sparql_escape_uri(expression_uri)),
+            sudo=True
+        )
 
-        self.logger.info(f"Created English expression {en_expr_uri} in graph {graph_uri}")
-        return en_expr_uri
+        bindings = query_result.get("results", {}).get("bindings", [])
+        texts: list[str] = []
+        seen = set()
+        for binding in bindings:
+            for field in ("content", "title", "description", "decision_basis"):
+                value = binding.get(field, {}).get("value")
+                if value and value not in seen:
+                    texts.append(value)
+                    seen.add(value)
+
+        return "\n".join(texts)
 
     def process(self):
-        original_text = self.fetch_data()
-        self.logger.info(original_text)
-
-        # whitespace-only content can crash langdetect
-        if not original_text or not original_text.strip():
-            self.logger.warning("No content available for language detection; skipping language annotation")
-            return
-
-        try:
-            source_language = langdetect.detect(original_text)
-        except Exception as e:
-            self.logger.warning(f"Language detection failed ({e}); defaulting to 'en'")
-            source_language = "en"
-
-        # Always annotate the original expression with its detected language
-        self.create_language_relation(self.source, source_language)
-
-        # Ensure we have English text for NER
-        if source_language.lower() == "en":
-            english_text = original_text
+        """
+        Process NER task by retrieving English translation from database and extracting entities.
+        Assumes TranslationTask has already run and created the English expression.
+        """
+        self.logger.info(f"Processing entity extraction for source: {self.source}")
+        
+        # Try to find English expression that realizes the same work
+        english_expression_uri = self.fetch_english_expression_uri()
+        
+        if english_expression_uri:
+            # Use English expression for NER
+            self.logger.info(f"Found English expression {english_expression_uri}, using it for NER")
+            english_text = self.fetch_expression_data(english_expression_uri)
+            target_expression_uri = english_expression_uri
         else:
-            english_text = self.translate_to_english(original_text, source_language)
-
-        # Create an English eli:Expression node that realizes the same work
-        english_expression_uri = self.create_english_expression(english_text)
-
-        # Annotate the English expression with its language (following diagram pattern)
-        self.create_language_relation(english_expression_uri, "en")
+            # Fallback to original expression if no English translation available
+            self.logger.warning(f"No English expression found, using original expression {self.source} for NER")
+            english_text = self.fetch_data()
+            target_expression_uri = self.source
+        
+        if not english_text or not english_text.strip():
+            self.logger.warning("No content available for entity extraction")
+            return
 
         # Extract title using LLM-based title extraction on the English text
         title_entities = extract_entities(english_text, language="en", method="title")
-        self.create_title_relation(english_expression_uri, title_entities)
+        self.create_title_relation(target_expression_uri, title_entities)
 
         # Extract general entities (DATE, etc.) on the English text
         general_entities = self.extract_general_entities(english_text, language="en")
-        self.create_general_entity_annotations(english_expression_uri, general_entities)
+        self.create_general_entity_annotations(target_expression_uri, general_entities)
 
 
 class ModelAnnotatingTask(DecisionTask):
@@ -951,7 +943,8 @@ class TranslationTask(DecisionTask):
     
     def process(self):
         """
-        Main processing logic: fetch text, translate it, store in triplestore.
+        Main processing logic: fetch text, detect language, annotate source expression,
+        translate it, and store translated expression in triplestore.
         """
         # Fetch the original text
         original_text = self.fetch_data()
@@ -962,21 +955,19 @@ class TranslationTask(DecisionTask):
             self.logger.warning("No content found for source; skipping translation")
             return
         
-        # Retrieve source language from database (set by NER task)
-        source_language = self.retrieve_source_language(content=original_text)
+        # Detect source language (translation task always runs first, so we detect here)
+        try:
+            # Limit text length for language detection to avoid hanging on very long text
+            text_for_detection = original_text[:1000] if len(original_text) > 1000 else original_text
+            self.logger.debug(f"Using {len(text_for_detection)} chars (of {len(original_text)}) for language detection")
+            source_language = langdetect.detect(text_for_detection)
+            self.logger.info(f"Detected source language: {source_language}")
+        except Exception as e:
+            self.logger.error(f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
+            source_language = "nl"  # Default to Dutch for Belgian documents
         
-        # Ensure we have an explicit source language
-        if not source_language or source_language.lower() == "auto":
-            self.logger.warning("Source language was 'auto' or missing, detecting from content...")
-            try:
-                # Limit text length for language detection to avoid hanging on very long text
-                text_for_detection = original_text[:1000] if len(original_text) > 1000 else original_text
-                self.logger.debug(f"Using {len(text_for_detection)} chars (of {len(original_text)}) for language detection")
-                source_language = langdetect.detect(text_for_detection)
-                self.logger.info(f"Detected source language: {source_language}")
-            except Exception as e:
-                self.logger.error(f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
-                source_language = "nl"  # Default to Dutch for Belgian documents
+        # Always annotate the source expression with its detected language
+        self.create_language_relation(self.source, source_language)
         
         # Skip translation if already in target language
         if source_language.lower() == self.target_language.lower():
