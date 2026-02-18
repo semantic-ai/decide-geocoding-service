@@ -25,7 +25,6 @@ from .llm_models.llm_task_models import LlmTaskInput, EntityLinkingTaskOutput
 from .classifier.train import train
 
 
-
 class Task(ABC):
     """Base class for background tasks that process data from the triplestore."""
 
@@ -69,7 +68,8 @@ class Task(ABC):
             candidate_cls = cls.lookup(b['taskType']['value'])
             if candidate_cls is not None:
                 return candidate_cls(task_uri)
-            raise RuntimeError("Unknown task type {0}".format(b['taskType']['value']))
+            raise RuntimeError(
+                "Unknown task type {0}".format(b['taskType']['value']))
         raise RuntimeError("Task with uri {0} not found".format(task_uri))
 
     def change_state(self, old_state: str, new_state: str, results_container_uri: str = "") -> None:
@@ -121,11 +121,13 @@ class Task(ABC):
             yield
             self.change_state("busy", "success")
         except Exception as e:
-            self.logger.error(f"Task {self.task_uri} failed: {type(e).__name__}: {str(e)}", exc_info=True)
+            self.logger.error(
+                f"Task {self.task_uri} failed: {type(e).__name__}: {str(e)}", exc_info=True)
             try:
                 self.change_state("busy", "failed")
             except Exception as state_error:
-                self.logger.error(f"Failed to update task {self.task_uri} status to failed: {state_error}")
+                self.logger.error(
+                    f"Failed to update task {self.task_uri} status to failed: {state_error}")
             raise
 
     def execute(self):
@@ -141,7 +143,7 @@ class Task(ABC):
 
 class DecisionTask(Task, ABC):
     """Task that processes decision-making data with input and output containers."""
-    
+
     def __init__(self, task_uri: str):
         super().__init__(task_uri)
         self.source_graph: Optional[str] = None
@@ -229,10 +231,12 @@ class DecisionTask(Task, ABC):
         bindings = query_result.get("results", {}).get("bindings", [])
         if bindings and "work" in bindings[0]:
             work_uri = bindings[0]["work"]["value"]
-            self.logger.info(f"Found work {work_uri} for expression {self.source}")
+            self.logger.info(
+                f"Found work {work_uri} for expression {self.source}")
             return work_uri
 
-        self.logger.warning(f"No eli:realizes work found for expression {self.source}")
+        self.logger.warning(
+            f"No eli:realizes work found for expression {self.source}")
         return None
 
 
@@ -241,15 +245,18 @@ class GeoExtractionTask(DecisionTask):
 
     __task_type__ = TASK_OPERATIONS["geo_extraction"]
     config = get_config()
-    ner_analyzer = SpacyGeoAnalyzer(model_path=os.getenv("NER_MODEL_PATH"), labels=config.ner.labels)
-    geocoder = NominatimGeocoder(base_url=str(config.geocoding.nominatim_base_url), rate_limit=0.5)
+    ner_analyzer = SpacyGeoAnalyzer(model_path=os.getenv(
+        "NER_MODEL_PATH"), labels=config.ner.labels)
+    geocoder = NominatimGeocoder(base_url=str(
+        config.geocoding.nominatim_base_url), rate_limit=0.5)
 
     def apply_geo_entities(self, task_data: str):
         """Extract geographic entities from text and store as annotations."""
         default_city = "Gent"
 
         cleaned_text = clean_string(task_data)
-        detectables, _, doc = process_text(cleaned_text, self.__class__.ner_analyzer, default_city)
+        detectables, _, doc = process_text(
+            cleaned_text, self.__class__.ner_analyzer, default_city)
 
         if hasattr(doc, 'error'):
             self.logger.error(f"Error: {doc['error']}")
@@ -260,19 +267,22 @@ class GeoExtractionTask(DecisionTask):
                 for geo_entity in ["streets", "addresses"]:
                     if geo_entity in detectables:
                         for detectable in detectables[geo_entity]:
-                            result = geocode_detectable(detectable, self.__class__.geocoder, default_city)
+                            result = geocode_detectable(
+                                detectable, self.__class__.geocoder, default_city)
                             print(result)
 
                             if result["success"]:
                                 if geo_entity == "streets":
-                                    offsets = get_start_end_offsets(task_data, detectable["name"])
+                                    offsets = get_start_end_offsets(
+                                        task_data, detectable["name"])
                                     start_offset = offsets[0][0]
                                     end_offset = offsets[0][1]
                                     annotation = GeoAnnotation(
                                         result.get("geojson", {}),
                                         self.task_uri,
                                         self.source,
-                                        "http://example.org/{0}".format(uuid4()),
+                                        "http://example.org/{0}".format(
+                                            uuid4()),
                                         start_offset,
                                         end_offset,
                                         AI_COMPONENTS["ner_extractor"],
@@ -287,7 +297,8 @@ class GeoExtractionTask(DecisionTask):
         task_data = self.fetch_data()
         self.logger.info(task_data)
         self.apply_geo_entities(task_data)
-        
+
+
 class EntityExtractionTask(DecisionTask):
     """Task that extracts named entities from text."""
 
@@ -319,7 +330,8 @@ class EntityExtractionTask(DecisionTask):
                     "gemma": ("translation_plugin_gemma", "GemmaTranslateService", False),
                 }
 
-                module_name, class_name, is_external = registry.get(provider, registry.get("huggingface"))
+                module_name, class_name, is_external = registry.get(
+                    provider, registry.get("huggingface"))
                 base_package = __package__ or "src"
                 module_path = module_name if is_external else f"{base_package}.{module_name}"
 
@@ -333,7 +345,7 @@ class EntityExtractionTask(DecisionTask):
     def create_language_relation(self, source_uri: str, language: str):
         """
         Create a language annotation for the source.
-        
+
         Note: An alternative approach would be to use an "UNK" (unknown) token
         for unsupported languages to preserve metadata that language detection
         was attempted, rather than silently skipping the annotation.
@@ -369,12 +381,13 @@ class EntityExtractionTask(DecisionTask):
                     agent=AI_COMPONENTS["ner_extractor"],
                     agent_type=AGENT_TYPES["ai_component"]
                 ).add_to_triplestore()
-                self.logger.info(f"Created Title triplet suggestion for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
+                self.logger.info(
+                    f"Created Title triplet suggestion for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
 
     def create_general_entity_annotations(self, source_uri: str, entities: list[dict[str, Any]]):
         """
         Create triplet suggestions for entities by mapping (refined) labels to RDF predicates.
-        
+
         Only entities with a configured mapping are saved. If a label is unmapped
         (or mapped to an empty string), the entity is skipped.
         """
@@ -403,7 +416,7 @@ class EntityExtractionTask(DecisionTask):
     def extract_general_entities(self, task_data: str, language: str = None, method: str = None) -> list[dict[str, Any]]:
         """
         Extract general NER entities (PERSON, ORG, DATE, etc.) from text.
-        
+
         Args:
             task_data: Text to extract entities from
             language: Language for extraction ('nl', 'de', 'en'). Defaults to config.ner.language.
@@ -414,11 +427,13 @@ class EntityExtractionTask(DecisionTask):
             language = config.ner.language
         if method is None:
             method = config.ner.method
-        
-        self.logger.info(f"Extracting general entities using {method}/{language}")
-        
+
+        self.logger.info(
+            f"Extracting general entities using {method}/{language}")
+
         # Extract entities using the factory pattern
-        entities = extract_entities(task_data, language=language, method=method)
+        entities = extract_entities(
+            task_data, language=language, method=method)
         self.logger.info(f"Found {len(entities)} general entities")
 
         return entities
@@ -430,13 +445,15 @@ class EntityExtractionTask(DecisionTask):
         """
         config = get_config()
         translator = self.get_translator()
-        self.logger.info(f"Translating source text from {source_language} to en for NER")
+        self.logger.info(
+            f"Translating source text from {source_language} to en for NER")
         translation_result = translator.translate(
             text,
             destination_language="en",
             source_language=source_language or "auto",
         )
-        self.logger.info(f"Translation service used for NER: {translation_result.service}")
+        self.logger.info(
+            f"Translation service used for NER: {translation_result.service}")
         return translation_result.result
 
     def create_english_expression(self, english_text: str) -> str:
@@ -482,7 +499,8 @@ class EntityExtractionTask(DecisionTask):
                 agent_type=AGENT_TYPES["ai_component"],
             ).add_to_triplestore()
 
-        self.logger.info(f"Created English expression {en_expr_uri} in graph {graph_uri}")
+        self.logger.info(
+            f"Created English expression {en_expr_uri} in graph {graph_uri}")
         return en_expr_uri
 
     def process(self):
@@ -491,13 +509,15 @@ class EntityExtractionTask(DecisionTask):
 
         # whitespace-only content can crash langdetect
         if not original_text or not original_text.strip():
-            self.logger.warning("No content available for language detection; skipping language annotation")
+            self.logger.warning(
+                "No content available for language detection; skipping language annotation")
             return
 
         try:
             source_language = langdetect.detect(original_text)
         except Exception as e:
-            self.logger.warning(f"Language detection failed ({e}); defaulting to 'en'")
+            self.logger.warning(
+                f"Language detection failed ({e}); defaulting to 'en'")
             source_language = "en"
 
         # Always annotate the original expression with its detected language
@@ -507,7 +527,8 @@ class EntityExtractionTask(DecisionTask):
         if source_language.lower() == "en":
             english_text = original_text
         else:
-            english_text = self.translate_to_english(original_text, source_language)
+            english_text = self.translate_to_english(
+                original_text, source_language)
 
         # Create an English eli:Expression node that realizes the same work
         english_expression_uri = self.create_english_expression(english_text)
@@ -516,17 +537,20 @@ class EntityExtractionTask(DecisionTask):
         self.create_language_relation(english_expression_uri, "en")
 
         # Extract title using LLM-based title extraction on the English text
-        title_entities = extract_entities(english_text, language="en", method="title")
+        title_entities = extract_entities(
+            english_text, language="en", method="title")
         self.create_title_relation(english_expression_uri, title_entities)
 
         # Extract general entities (DATE, etc.) on the English text
-        general_entities = self.extract_general_entities(english_text, language="en")
-        self.create_general_entity_annotations(english_expression_uri, general_entities)
+        general_entities = self.extract_general_entities(
+            english_text, language="en")
+        self.create_general_entity_annotations(
+            english_expression_uri, general_entities)
 
 
 class ModelAnnotatingTask(DecisionTask):
     """Task that links the correct code from a list to text."""
-    
+
     __task_type__ = TASK_OPERATIONS["model_annotation"]
 
     def __init__(self, task_uri: str, source: str | None = None):
@@ -562,7 +586,8 @@ class ModelAnnotatingTask(DecisionTask):
         self.logger.info(task_data)
 
         if not task_data.strip():
-            self.logger.warning("No task data found; skipping model annotation.")
+            self.logger.warning(
+                "No task data found; skipping model annotation.")
             return
 
         # TO DO: ADD FUNCTION TO RETRIEVE ACTUAL CODE LIST
@@ -589,7 +614,8 @@ class ModelAnnotatingTask(DecisionTask):
         config = get_config()
         api_key = config.llm.api_key.get_secret_value() if config.llm.api_key else None
         if not api_key:
-            self.logger.warning("OpenAI API key missing (config.llm.api_key), using dummy SDG label for testing.")
+            self.logger.warning(
+                "OpenAI API key missing (config.llm.api_key), using dummy SDG label for testing.")
             classes = [random.choice(sdgs).replace(" ", "_")]
         else:
             try:
@@ -600,9 +626,11 @@ class ModelAnnotatingTask(DecisionTask):
                                          output_format=EntityLinkingTaskOutput)
 
                 response = self._llm(llm_input)
-                classes = [designated_class.replace(" ", "_") for designated_class in response.designated_classes]
+                classes = [designated_class.replace(
+                    " ", "_") for designated_class in response.designated_classes]
             except Exception as exc:
-                self.logger.warning(f"LLM call failed ({exc}); using dummy SDG label for testing.")
+                self.logger.warning(
+                    f"LLM call failed ({exc}); using dummy SDG label for testing.")
                 classes = [random.choice(sdgs).replace(" ", "_")]
 
         for c in classes:
@@ -631,7 +659,8 @@ class ModelBatchAnnotatingTask(Task, ABC):
 
         for i, decision_uri in enumerate(decision_uris):
             ModelAnnotatingTask(self.task_uri, decision_uri).process()
-            print(f"Processed decision {i+1}/{len(decision_uris)}: {decision_uri}", flush=True)
+            print(
+                f"Processed decision {i+1}/{len(decision_uris)}: {decision_uri}", flush=True)
 
     def fetch_decisions_without_annotations(self) -> list[str]:
         q = get_prefixes_for_query("rdf", "eli", "oa") + """
@@ -655,7 +684,7 @@ class ModelBatchAnnotatingTask(Task, ABC):
         decision_uris = [b["s"]["value"] for b in bindings if "s" in b]
 
         return decision_uris
-    
+
 
 class ClassifierTrainingTask(Task, ABC):
     """Task that trains a classifier for the available annotations in the triple store."""
@@ -693,7 +722,7 @@ class ClassifierTrainingTask(Task, ABC):
                 "SDG-16 Peace, Justice and Strong Institutions",
                 "SDG-17 Partnerships for the Goals"
                 ]
-        
+
         config = get_config()
         ml_config = config.ml_training
 
@@ -711,11 +740,11 @@ class ClassifierTrainingTask(Task, ABC):
 
     def convert_classes_to_original_names(self, decisions: list[dict[str, str | list[str]]]):
         for decision in decisions:
-            decision["classes"] = [c.split("/")[-1].replace("_", " ") for c in decision["classes"]]
+            decision["classes"] = [
+                c.split("/")[-1].replace("_", " ") for c in decision["classes"]]
 
         return decisions
 
-        
     def fetch_decisions_with_classes(self) -> list[dict[str, str | list[str]]]:
         q = get_prefixes_for_query("rdf", "eli", "eli-dl", "oa", "epvoc", "dct") + """
         SELECT ?decision ?title ?description ?decision_basis ?content ?classes
@@ -756,7 +785,8 @@ class ClassifierTrainingTask(Task, ABC):
             decision_basis = b.get("decision_basis", {}).get("value", "")
             content = b.get("content", {}).get("value", "")
 
-            text = "\n".join([t for t in [title, description, decision_basis, content] if t])
+            text = "\n".join(
+                [t for t in [title, description, decision_basis, content] if t])
 
             results.append({
                 "decision": decision,
@@ -769,16 +799,16 @@ class ClassifierTrainingTask(Task, ABC):
 
 class TranslationTask(DecisionTask):
     """Task that translates text to a target language using a configurable translation provider."""
-    
+
     __task_type__ = TASK_OPERATIONS["translation"]
-    
+
     def __init__(self, task_uri: str):
         super().__init__(task_uri)
-        
+
         config = get_config()
         self.target_language = config.translation.target_language
         self._translator = None
-    
+
     def get_translator(self):
         """Lazy load translator based on config.translation.provider."""
         if self._translator is None:
@@ -799,30 +829,32 @@ class TranslationTask(DecisionTask):
                     "gemma": ("translation_plugin_gemma", "GemmaTranslateService", False),
                 }
 
-                module_name, class_name, is_external = registry.get(provider, registry.get("etranslation", registry["huggingface"])) 
+                module_name, class_name, is_external = registry.get(
+                    provider, registry.get("etranslation", registry["huggingface"]))
                 base_package = __package__ or "src"
                 module_path = module_name if is_external else f"{base_package}.{module_name}"
 
-                self.logger.info(f"Loading translation module: {module_path}, class: {class_name}, provider: {provider}")
+                self.logger.info(
+                    f"Loading translation module: {module_path}, class: {class_name}, provider: {provider}")
                 module = importlib.import_module(module_path)
                 service_cls = getattr(module, class_name)
-                service = service_cls()                
+                service = service_cls()
                 self._translator = Translator(services_list=[service])
 
             self.logger.info("Translator initialized successfully")
-            
+
         return self._translator
-    
+
     def retrieve_source_language(self, content: Optional[str] = None) -> str:
         """
         Retrieve the source language from the triplestore.
         The language should have been stored by EntityExtractionTask via TripletAnnotation.
         If not found, detect it from the content.
-        
+
         Args:
             content: Optional content string to use for language detection fallback.
                     If not provided and detection is needed, will fetch data.
-        
+
         Returns:
             Language code (e.g., 'nl', 'de', 'en')
         """
@@ -840,41 +872,47 @@ class TranslationTask(DecisionTask):
             }
             LIMIT 1
             """).substitute(source=self.source)
-        
+
         result = query(query_string, sudo=True)
         bindings = result.get("results", {}).get("bindings", [])
         language_uri = None
         if bindings and "language" in bindings[0] and "value" in bindings[0].get("language", {}):
             language_uri = bindings[0]["language"]["value"]
-        
+
         if language_uri:
             lang_code = LANGUAGE_URI_TO_CODE.get(language_uri)
             if lang_code:
-                self.logger.info(f"Retrieved source language from database: {lang_code}")
+                self.logger.info(
+                    f"Retrieved source language from database: {lang_code}")
                 return lang_code
             self.logger.warning(f"Unknown language URI: {language_uri}")
-        
+
         # Fallback: detect language from content
-        self.logger.warning("No language found in database, detecting from content...")
+        self.logger.warning(
+            "No language found in database, detecting from content...")
         if not content:
             content = self.fetch_data()
-        
+
         if not content or not content.strip():
-            raise ValueError(f"No content available for language detection: {self.source}")
-        
+            raise ValueError(
+                f"No content available for language detection: {self.source}")
+
         # Limit text length for language detection to avoid hanging on very long text
         # langdetect can be slow/hang on very long text, so use first 1000 chars
         text_for_detection = content[:1000] if len(content) > 1000 else content
-        self.logger.debug(f"Using {len(text_for_detection)} chars (of {len(content)}) for language detection")
-        
+        self.logger.debug(
+            f"Using {len(text_for_detection)} chars (of {len(content)}) for language detection")
+
         try:
             detected_lang = langdetect.detect(text_for_detection)
-            self.logger.info(f"Detected language from content: {detected_lang}")
+            self.logger.info(
+                f"Detected language from content: {detected_lang}")
             return detected_lang
         except Exception as e:
-            self.logger.error(f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
+            self.logger.error(
+                f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
             return "nl"  # Default to Dutch for Belgian documents
-    
+
     def create_language_relation(self, source_uri: str, language: str):
         """
         Create a language annotation for the source expression.
@@ -896,20 +934,20 @@ class TranslationTask(DecisionTask):
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore()
 
-    def create_translated_expression(self, translated_text: str, target_language: str) -> str:
+    def create_translated_expression(self, translated_text: str, target_language: str, work_uri: str) -> str:
         """
         Create an eli:Expression resource for the translated text and
         link it to the same work as the source expression when available.
-        
+
         Args:
             translated_text: The translated content
             target_language: Target language code (e.g., 'en', 'nl', 'de')
-        
+            work_uri: The URI of the work that the translated expression realizes
+
         Returns:
             URI of the created translated expression
         """
         translated_expr_uri = f"http://example.org/{uuid4()}"
-        work_uri = self.fetch_work_uri()
         graph_uri = self.source_graph or GRAPHS["ai"]
 
         realizes_triple = ""
@@ -946,78 +984,155 @@ class TranslationTask(DecisionTask):
                 agent_type=AGENT_TYPES["ai_component"],
             ).add_to_triplestore()
 
-        self.logger.info(f"Created translated expression {translated_expr_uri} in graph {graph_uri} (language: {target_language})")
+        self.logger.info(
+            f"Created translated expression {translated_expr_uri} in graph {graph_uri} (language: {target_language})")
         return translated_expr_uri
-    
+
+    def fetch_eli_expressions(self) -> dict[str, list[str]]:
+        """
+        Retrieve ELI expressions, their epvoc:expressionContent,
+        language, and corresponding ELI work URI from the task's input container.
+
+        Returns:
+            Dictionary containing:
+                - "expression_uris": list[str]        (URIs of the expressions)
+                - "expression_contents": list[str]    (text content extracted)
+                - "languages": list[str]              (language URI of the expression)
+                - "work_uris": list[str]              (URIs of the ELI works realizing the expressions)
+        """
+        q = Template(
+            get_prefixes_for_query("task", "epvoc", "eli") +
+            f"""
+            SELECT ?expression ?content ?lang ?work WHERE {{
+            GRAPH <{GRAPHS["jobs"]}> {{
+                $task task:inputContainer ?container .
+            }}
+
+            GRAPH <{GRAPHS["data_containers"]}> {{
+                ?container task:hasResource ?expression .
+            }}
+
+            GRAPH <{GRAPHS["expressions"]}> {{
+                ?expression a eli:Expression ;
+                            epvoc:expressionContent ?content ;
+                            eli:language ?lang .
+            }}
+
+            GRAPH <{GRAPHS["works"]}> {{
+                ?work a eli:Work ;
+                    eli:is_realized_by ?expression .
+            }}
+            }}
+            """
+        ).substitute(task=sparql_escape_uri(self.task_uri))
+
+        bindings = query(q, sudo=True).get("results", {}).get("bindings", [])
+        if not bindings:
+            self.logger.warning(
+                f"No expressions found in input container for task {self.task_uri}")
+            return {
+                "expression_uris": [],
+                "expression_contents": [],
+                "languages": [],
+                "work_uris": [],
+            }
+
+        expression_uris = [b["expression"]["value"] for b in bindings]
+        expression_contents = [b["content"]["value"] for b in bindings]
+        languages = [b["lang"]["value"] for b in bindings]
+        work_uris = [b["work"]["value"] for b in bindings]
+
+        return {
+            "expression_uris": expression_uris,
+            "expression_contents": expression_contents,
+            "languages": languages,
+            "work_uris": work_uris,
+        }
+
     def process(self):
         """
         Main processing logic: fetch text, translate it, store in triplestore.
         """
         # Fetch the original text
-        original_text = self.fetch_data()
-        self.logger.info(f"Processing translation for source: {self.source}")
+        eli_expressions = self.fetch_eli_expressions()
 
-        # If there's no content, skip early
-        if not original_text or not original_text.strip():
-            self.logger.warning("No content found for source; skipping translation")
-            return
-        
-        # Retrieve source language from database (set by NER task)
-        source_language = self.retrieve_source_language(content=original_text)
-        
-        # Ensure we have an explicit source language
-        if not source_language or source_language.lower() == "auto":
-            self.logger.warning("Source language was 'auto' or missing, detecting from content...")
-            try:
-                # Limit text length for language detection to avoid hanging on very long text
-                text_for_detection = original_text[:1000] if len(original_text) > 1000 else original_text
-                self.logger.debug(f"Using {len(text_for_detection)} chars (of {len(original_text)}) for language detection")
-                source_language = langdetect.detect(text_for_detection)
-                self.logger.info(f"Detected source language: {source_language}")
-            except Exception as e:
-                self.logger.error(f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
-                source_language = "nl"  # Default to Dutch for Belgian documents
-        
-        # Skip translation if already in target language
-        if source_language.lower() == self.target_language.lower():
-            self.logger.info(f"Text is already in target language ({self.target_language}), skipping translation")
-            return
-        
-        # Get translator and translate
-        translator = self.get_translator()
-        
-        self.logger.info(f"Translating from {source_language} to {self.target_language}")
-        
-        # Use translatepy's translate method
-        translation_result = translator.translate(
-            original_text,
-            destination_language=self.target_language,
-            source_language=source_language
-        )
-        
-        # Extract the translated text from the result
-        translated_text = translation_result.result
-        service_used = translation_result.service
-        self.logger.info(f"Translation service used: {service_used}")
-        
-        self.logger.info(f"Translation completed.")
-        
-        # Create a new eli:Expression for the translated text
-        normalized_target_lang = self.target_language.lower()
-        translated_expression_uri = self.create_translated_expression(translated_text, normalized_target_lang)
-        
-        # Annotate the translated expression with its language 
-        self.create_language_relation(translated_expression_uri, normalized_target_lang)
-        
-        self.logger.info(f"Translation stored as new expression: {translated_expression_uri}")
+        for i in range(len(eli_expressions["expression_uris"])):
+            original_text = eli_expressions["expression_contents"][i]
+            source_language = LANGUAGE_URI_TO_CODE.get(
+                eli_expressions["languages"][i], None)
+            work_uri = eli_expressions["work_uris"][i]
+            self.logger.info(
+                f"Processing translation for source: {self.source}")
+
+            # If there's no content, skip early
+            if not original_text or not original_text.strip():
+                self.logger.warning(
+                    "No content found for source; skipping translation")
+                return
+
+            # Ensure we have an explicit source language
+            if not source_language or source_language.lower() == "auto":
+                self.logger.warning(
+                    "Source language was 'auto' or missing, detecting from content...")
+                try:
+                    # Limit text length for language detection to avoid hanging on very long text
+                    text_for_detection = original_text[:1000] if len(
+                        original_text) > 1000 else original_text
+                    self.logger.debug(
+                        f"Using {len(text_for_detection)} chars (of {len(original_text)}) for language detection")
+                    source_language = langdetect.detect(text_for_detection)
+                    self.logger.info(
+                        f"Detected source language: {source_language}")
+                except Exception as e:
+                    self.logger.error(
+                        f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
+                    source_language = "nl"  # Default to Dutch for Belgian documents
+
+            # Skip translation if already in target language
+            if source_language.lower() == self.target_language.lower():
+                self.logger.info(
+                    f"Text is already in target language ({self.target_language}), skipping translation")
+                return
+
+            # Get translator and translate
+            translator = self.get_translator()
+
+            self.logger.info(
+                f"Translating from {source_language} to {self.target_language}")
+
+            # Use translatepy's translate method
+            translation_result = translator.translate(
+                original_text,
+                destination_language=self.target_language,
+                source_language=source_language
+            )
+
+            # Extract the translated text from the result
+            translated_text = translation_result.result
+            service_used = translation_result.service
+            self.logger.info(f"Translation service used: {service_used}")
+
+            self.logger.info(f"Translation completed.")
+
+            # Create a new eli:Expression for the translated text
+            normalized_target_lang = self.target_language.lower()
+            translated_expression_uri = self.create_translated_expression(
+                translated_text, normalized_target_lang, work_uri)
+
+            # Annotate the translated expression with its language
+            self.create_language_relation(
+                translated_expression_uri, normalized_target_lang)
+
+            self.logger.info(
+                f"Translation stored as new expression: {translated_expression_uri}")
 
 
 # SegmentationTask and its variants both follow the same pattern: fetch text, run segmentor, store spans as annotations.
 class SegmentationTask(DecisionTask):
     """Run the marked segmentation model and store segment spans as annotations."""
-    
+
     __task_type__ = TASK_OPERATIONS["segmentation"]
-    
+
     def fetch_english_expression_uri(self) -> Optional[str]:
         """
         Find the English expression that realizes the same work as the source expression.
@@ -1025,15 +1140,17 @@ class SegmentationTask(DecisionTask):
         """
         work_uri = self.fetch_work_uri()
         if not work_uri:
-            self.logger.info(f"No work found for expression {self.source}, cannot find English translation")
+            self.logger.info(
+                f"No work found for expression {self.source}, cannot find English translation")
             return None
-        
+
         # Get English language URI
         en_lang_uri = LANGUAGE_CODE_TO_URI.get("en")
         if not en_lang_uri:
-            self.logger.warning("English language URI not found in LANGUAGE_CODE_TO_URI")
+            self.logger.warning(
+                "English language URI not found in LANGUAGE_CODE_TO_URI")
             return None
-        
+
         # Query for English expression that realizes the same work
         # Check via language annotation (since we use TripletAnnotation for language, not dct:language)
         query_template = Template(
@@ -1057,7 +1174,7 @@ class SegmentationTask(DecisionTask):
             LIMIT 1
             """
         )
-        
+
         query_result = query(
             query_template.substitute(
                 work=sparql_escape_uri(work_uri),
@@ -1065,16 +1182,17 @@ class SegmentationTask(DecisionTask):
             ),
             sudo=True
         )
-        
+
         bindings = query_result.get("results", {}).get("bindings", [])
         if bindings and "en_expr" in bindings[0]:
             en_expr_uri = bindings[0]["en_expr"]["value"]
-            self.logger.info(f"Found English expression {en_expr_uri} for work {work_uri}")
+            self.logger.info(
+                f"Found English expression {en_expr_uri} for work {work_uri}")
             return en_expr_uri
-        
+
         self.logger.info(f"No English expression found for work {work_uri}")
         return None
-    
+
     def fetch_expression_data(self, expression_uri: str) -> str:
         """
         Retrieve the text content from a specific expression URI.
@@ -1098,7 +1216,8 @@ class SegmentationTask(DecisionTask):
         """)
 
         query_result = query(
-            query_template.substitute(expression=sparql_escape_uri(expression_uri)),
+            query_template.substitute(
+                expression=sparql_escape_uri(expression_uri)),
             sudo=True
         )
 
@@ -1113,7 +1232,7 @@ class SegmentationTask(DecisionTask):
                     seen.add(value)
 
         return "\n".join(texts)
-    
+
     def _create_segmentor(self):
         """Create a Segmentor configured from app config."""
         from .library.segmentors import GemmaSegmentor, LLMSegmentor
@@ -1136,7 +1255,7 @@ class SegmentationTask(DecisionTask):
                 temperature=seg_config.temperature,
                 max_new_tokens=seg_config.max_new_tokens,
             )
-    
+
     def create_segment_annotations(self, source_uri: str, segments: list[dict[str, Any]]):
         """
         Store segment spans as TripletAnnotation.
@@ -1145,11 +1264,11 @@ class SegmentationTask(DecisionTask):
         for segment in segments:
             segment_label = segment.get('label', 'UNKNOWN')
             segment_text = segment.get('text', '')
-            
+
             # Use segment label as predicate (e.g., "ex:TITLE", "ex:PARTICIPANTS")
             # Convert to proper predicate format
             predicate = f"ex:{segment_label}"
-            
+
             TripletAnnotation(
                 subject=source_uri,
                 predicate=predicate,
@@ -1162,37 +1281,39 @@ class SegmentationTask(DecisionTask):
                 agent_type=AGENT_TYPES["ai_component"],
                 confidence=1.0
             ).add_to_triplestore()
-            self.logger.info(f"Created segment annotation for '{segment_label}' at [{segment.get('start')}:{segment.get('end')}] with text: '{segment_text[:50]}...'")
-    
+            self.logger.info(
+                f"Created segment annotation for '{segment_label}' at [{segment.get('start')}:{segment.get('end')}] with text: '{segment_text[:50]}...'")
+
     def process(self):
         """
         Fetch English text through original expression (if translation available),
         run the segmentor, and save annotations on the English expression.
         """
         self.logger.info(f"Processing segmentation for {self.source}")
-        
+
         # Try to find English expression that realizes the same work
         english_expression_uri = self.fetch_english_expression_uri()
-        
+
         if english_expression_uri:
             # Use English expression for segmentation
-            self.logger.info(f"Found English expression {english_expression_uri}, using it for segmentation")
+            self.logger.info(
+                f"Found English expression {english_expression_uri}, using it for segmentation")
             task_data = self.fetch_expression_data(english_expression_uri)
             target_expression_uri = english_expression_uri
         else:
             # Fallback to original expression if no English translation available
-            self.logger.info(f"No English expression found, using original expression {self.source}")
+            self.logger.info(
+                f"No English expression found, using original expression {self.source}")
             task_data = self.fetch_data()
             target_expression_uri = self.source
-        
+
         if not task_data or not task_data.strip():
             self.logger.warning("No content available for segmentation")
             return
-        
+
         segmentor = self._create_segmentor()
         segments = segmentor.segment(task_data)
         self.logger.info(f"Segmentor returned {len(segments)} segments")
-        
+
         # Save annotations on the target expression (English if available, otherwise original)
         self.create_segment_annotations(target_expression_uri, segments)
-
