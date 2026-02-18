@@ -2,6 +2,7 @@ import contextlib
 import logging
 import os
 import importlib
+import uuid
 import langdetect
 import random
 from abc import ABC, abstractmethod
@@ -31,6 +32,7 @@ class Task(ABC):
     def __init__(self, task_uri: str):
         super().__init__()
         self.task_uri = task_uri
+        self.results_container_uris = []
         self.logger = logging.getLogger(self.__class__.__name__)
 
     @classmethod
@@ -72,9 +74,11 @@ class Task(ABC):
                 "Unknown task type {0}".format(b['taskType']['value']))
         raise RuntimeError("Task with uri {0} not found".format(task_uri))
 
-    def change_state(self, old_state: str, new_state: str, results_container_uri: str = "") -> None:
+    def change_state(self, old_state: str, new_state: str) -> None:
         """Update the task status in the triplestore."""
-        query_template = Template(
+
+        # Update the task status
+        status_query = Template(
             get_prefixes_for_query("task", "adms") +
             """
             DELETE {
@@ -84,34 +88,53 @@ class Task(ABC):
             }
             INSERT {
             GRAPH <""" + GRAPHS["jobs"] + """> {
-                ?task
-                $results_container_line
-                adms:status <$new_status> .
-
+                ?task adms:status <$new_status> .
             }
             }
             WHERE {
             GRAPH <""" + GRAPHS["jobs"] + """> {
-                VALUES ?task {
-                  $task
-                }
-                ?task a ?thing .
-                
+                BIND($task AS ?task)
+                BIND(<$old_status> AS ?oldStatus)
                 OPTIONAL { ?task adms:status ?oldStatus . }
             }
             }
-            """)
-
-        results_container_line = ""
-        if results_container_uri:
-            results_container_line = f"task:resultsContainer <{results_container_uri}> ;"
-
-        query_string = query_template.substitute(
+            """
+        )
+        query_string = status_query.substitute(
             new_status=JOB_STATUSES[new_state],
-            task=sparql_escape_uri(self.task_uri),
-            results_container_line=results_container_line)
+            old_status=JOB_STATUSES[old_state],
+            task=sparql_escape_uri(self.task_uri)
+        )
 
         update(query_string, sudo=True)
+
+        # Batch-insert results containers (if any)
+        if self.results_container_uris:
+            BATCH_SIZE = 50
+            insert_template = Template(
+                get_prefixes_for_query("task", "adms") +
+                """
+                INSERT {
+                GRAPH <""" + GRAPHS["jobs"] + """> {
+                    ?task $results_container_line .
+                }
+                }
+                WHERE {
+                    BIND($task AS ?task)
+                }
+                """
+            )
+
+            for i in range(0, len(self.results_container_uris), BATCH_SIZE):
+                batch_uris = self.results_container_uris[i:i + BATCH_SIZE]
+                results_container_line = " ;\n".join(
+                    [f"task:resultsContainer {sparql_escape_uri(uri)}" for uri in batch_uris]
+                )
+                query_string = insert_template.substitute(
+                    task=sparql_escape_uri(self.task_uri),
+                    results_container_line=results_container_line
+                )
+                update(query_string, sudo=True)
 
     @contextlib.contextmanager
     def run(self):
@@ -995,10 +1018,10 @@ class TranslationTask(DecisionTask):
 
         Returns:
             Dictionary containing:
-                - "expression_uris": list[str]        (URIs of the expressions)
-                - "expression_contents": list[str]    (text content extracted)
-                - "languages": list[str]              (language URI of the expression)
-                - "work_uris": list[str]              (URIs of the ELI works realizing the expressions)
+                - "expression_uris": list containing the expression URIs
+                - "expression_contents": list containing the expression contents
+                - "languages": list containing the language URIs of the expressions
+                - "work_uris": list containing the work URIs of the expressions
         """
         q = Template(
             get_prefixes_for_query("task", "epvoc", "eli") +
@@ -1048,6 +1071,39 @@ class TranslationTask(DecisionTask):
             "languages": languages,
             "work_uris": work_uris,
         }
+
+    def create_output_container(self, resource: str) -> str:
+        """
+        Function to create an output data container for the translated ELI expression.
+
+        Args:
+            resource: String containing the URI of the translated ELI expression.
+
+        Returns:
+            String containing the URI of the output data container
+        """
+        container_id = str(uuid.uuid4())
+        container_uri = f"http://data.lblod.info/id/data-container/{container_id}"
+
+        q = Template(
+            get_prefixes_for_query("task", "nfo", "mu") +
+            f"""
+            INSERT DATA {{
+            GRAPH <{GRAPHS["data_containers"]}> {{
+                $container a nfo:DataContainer ;
+                    mu:uuid "$uuid" ;
+                    task:hasResource $resource .
+            }}
+            }}
+            """
+        ).substitute(
+            container=sparql_escape_uri(container_uri),
+            uuid=container_id,
+            resource=sparql_escape_uri(resource)
+        )
+
+        update(q, sudo=True)
+        return container_uri
 
     def process(self):
         """
@@ -1125,6 +1181,9 @@ class TranslationTask(DecisionTask):
 
             self.logger.info(
                 f"Translation stored as new expression: {translated_expression_uri}")
+
+            self.results_container_uris.append(
+                self.create_output_container(translated_expression_uri))
 
 
 # SegmentationTask and its variants both follow the same pattern: fetch text, run segmentor, store spans as annotations.
