@@ -87,7 +87,8 @@ class HuggingFaceTranslateService(BaseTranslator):
         for p in parts:
             if not cur:
                 # Validate first chunk - don't accept oversized parts blindly
-                if len(tokenizer.encode(p, add_special_tokens=False)) <= max_tokens:
+                # Check with special tokens to match what gets encoded (model max_length=512)
+                if len(tokenizer.encode(p, add_special_tokens=True)) <= max_tokens:
                     cur = p
                 else:
                     # First part is too large, split by words
@@ -97,7 +98,7 @@ class HuggingFaceTranslateService(BaseTranslator):
                             cur = w
                         else:
                             test_text = cur + " " + w
-                            if len(tokenizer.encode(test_text, add_special_tokens=False)) <= max_tokens:
+                            if len(tokenizer.encode(test_text, add_special_tokens=True)) <= max_tokens:
                                 cur = test_text
                             else:
                                 if cur:
@@ -106,7 +107,7 @@ class HuggingFaceTranslateService(BaseTranslator):
             else:
                 # Check if adding this part would exceed token limit
                 test_text = cur + " " + p
-                token_count = len(tokenizer.encode(test_text, add_special_tokens=False))
+                token_count = len(tokenizer.encode(test_text, add_special_tokens=True))
                 
                 if token_count <= max_tokens:
                     cur = test_text
@@ -117,13 +118,13 @@ class HuggingFaceTranslateService(BaseTranslator):
                     cur = ""
                     
                     # Check if the part itself exceeds limit (handle immediately like eTranslation)
-                    part_token_count = len(tokenizer.encode(p, add_special_tokens=False))
+                    part_token_count = len(tokenizer.encode(p, add_special_tokens=True))
                     if part_token_count > max_tokens:
                         # Word-level fallback for oversized parts
                         words = p.split()
                         for w in words:
                             # Safety check: if a single word exceeds limit, include it anyway
-                            word_token_count = len(tokenizer.encode(w, add_special_tokens=False))
+                            word_token_count = len(tokenizer.encode(w, add_special_tokens=True))
                             if word_token_count > max_tokens:
                                 # Save current chunk if exists
                                 if cur:
@@ -137,7 +138,7 @@ class HuggingFaceTranslateService(BaseTranslator):
                                 cur = w
                             else:
                                 test_text = cur + " " + w
-                                token_count = len(tokenizer.encode(test_text, add_special_tokens=False))
+                                token_count = len(tokenizer.encode(test_text, add_special_tokens=True))
                                 if token_count <= max_tokens:
                                     cur = test_text
                                 else:
@@ -168,8 +169,12 @@ class HuggingFaceTranslateService(BaseTranslator):
         
         if len(chunks) == 1:
             # Single chunk, translate directly
-            encoded = tokenizer(chunks[0], return_tensors="pt", padding=True, truncation=True, max_length=512)
-            translated = model.generate(**encoded, max_new_tokens=1024)
+            # Safety check: verify chunk doesn't exceed token limit
+            chunk_token_count = len(tokenizer.encode(chunks[0], add_special_tokens=True))
+            if chunk_token_count > 256:
+                self.logger.warning(f"Single chunk after splitting still exceeds limit ({chunk_token_count} > 256), will truncate")
+            encoded = tokenizer(chunks[0], return_tensors="pt", padding=True, truncation=True, max_length=256)
+            translated = model.generate(**encoded, max_new_tokens=400)
             return tokenizer.decode(translated[0], skip_special_tokens=True)
         
         self.logger.info(f"Chunking text into {len(chunks)} chunks for translation")
@@ -177,8 +182,12 @@ class HuggingFaceTranslateService(BaseTranslator):
         translated_chunks = []
         for i, chunk in enumerate(chunks, 1):
             self.logger.debug(f"Translating chunk {i}/{len(chunks)} ({len(chunk)} chars)")
-            encoded = tokenizer(chunk, return_tensors="pt", padding=True, truncation=True, max_length=512)
-            translated = model.generate(**encoded, max_new_tokens=1024)
+            # Safety check: verify chunk doesn't exceed token limit
+            chunk_token_count = len(tokenizer.encode(chunk, add_special_tokens=True))
+            if chunk_token_count > 256:
+                self.logger.warning(f"Chunk {i} exceeds token limit ({chunk_token_count} > 256), will truncate")
+            encoded = tokenizer(chunk, return_tensors="pt", padding=True, truncation=True, max_length=256)
+            translated = model.generate(**encoded, max_new_tokens=400)
             translated_text = tokenizer.decode(translated[0], skip_special_tokens=True)
             translated_chunks.append(translated_text)
         
@@ -199,15 +208,16 @@ class HuggingFaceTranslateService(BaseTranslator):
         model, tokenizer = self._load_model(src_lang, tgt_lang)
         
         # Check token count to determine if chunking is needed
-        token_count = len(tokenizer.encode(text, add_special_tokens=False))
+        # Use 256 limit to keep chunks small and avoid Helsinki model early stopping issues
+        token_count = len(tokenizer.encode(text, add_special_tokens=True))
         
         if token_count > 256:
-            self.logger.info(f"Text exceeds token limit ({token_count} > 512), using chunking")
+            self.logger.info(f"Text exceeds token limit ({token_count} > 256), using chunking")
             translation = self._translate_chunked(text, tokenizer, model, src_lang, tgt_lang)
         else:
             # Single chunk translation
-            encoded = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
-            translated = model.generate(**encoded, max_new_tokens=1024)
+            encoded = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=256)
+            translated = model.generate(**encoded, max_new_tokens=400)
             translation = tokenizer.decode(translated[0], skip_special_tokens=True)
         
         self.logger.info(f"Translation completed: {len(translation)} characters")
