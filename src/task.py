@@ -369,7 +369,7 @@ class EntityExtractionTask(DecisionTask):
                 self.logger.info(
                     f"Created Title triplet suggestion for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
 
-    def create_general_entity_annotations(self, source_uri: str, entities: list[dict[str, Any]]):
+    def create_general_entity_annotations(self, source_uri: str, entities: list[dict[str, Any]]) -> list[str]:
         """
         Create triplet suggestions for entities by mapping (refined) labels to RDF predicates.
 
@@ -378,6 +378,7 @@ class EntityExtractionTask(DecisionTask):
         """
         config = get_config()
         label_to_predicate = config.ner.label_to_predicate or {}
+        entity_uris = []
 
         for entity in entities:
             label = str(entity.get("label", "")).upper()
@@ -385,7 +386,7 @@ class EntityExtractionTask(DecisionTask):
             if not predicate:
                 continue
 
-            TripletAnnotation(
+            entity_uri = TripletAnnotation(
                 subject=source_uri,
                 predicate=predicate,
                 obj=sparql_escape_string(entity["text"]),
@@ -397,6 +398,9 @@ class EntityExtractionTask(DecisionTask):
                 agent_type=AGENT_TYPES["ai_component"],
                 confidence=entity.get("confidence", 1.0),
             ).add_to_triplestore()
+            entity_uris.append(entity_uri)
+
+        return entity_uris
 
     def extract_general_entities(self, task_data: str, language: str = None, method: str = None) -> list[dict[str, Any]]:
         """
@@ -523,6 +527,86 @@ class EntityExtractionTask(DecisionTask):
 
         return "\n".join(texts)
 
+    def fetch_eli_expressions(self) -> dict[str, list[str]]:
+        """
+        Retrieve the ELI expressions and their contents from the task's input container.
+        Note that these will be the translated expressions.
+
+        Returns:
+            Dictionary containing:
+                - "expression_uris": list containing the expression URIs
+                - "expression_contents": list containing the expression contents
+        """
+        q = Template(
+            get_prefixes_for_query("task", "epvoc", "eli") +
+            f"""
+            SELECT ?expression ?content WHERE {{
+            GRAPH <{GRAPHS["jobs"]}> {{
+                $task task:inputContainer ?container .
+            }}
+
+            GRAPH <{GRAPHS["data_containers"]}> {{
+                ?container task:hasResource ?expression .
+            }}
+
+            GRAPH <{GRAPHS["expressions"]}> {{
+                ?expression a eli:Expression ;
+                            epvoc:expressionContent ?content .
+            }}            
+            }}
+            """
+        ).substitute(task=sparql_escape_uri(self.task_uri))
+
+        bindings = query(q, sudo=True).get("results", {}).get("bindings", [])
+        if not bindings:
+            self.logger.warning(
+                f"No expressions found in input container for task {self.task_uri}")
+            return {
+                "expression_uris": [],
+                "expression_contents": []
+            }
+
+        expression_uris = [b["expression"]["value"] for b in bindings]
+        expression_contents = [b["content"]["value"] for b in bindings]
+
+        return {
+            "expression_uris": expression_uris,
+            "expression_contents": expression_contents
+        }
+
+    def create_output_container(self, resource: str) -> str:
+        """
+        Function to create an output data container for the translated ELI expression.
+
+        Args:
+            resource: String containing the URI of the translated ELI expression.
+
+        Returns:
+            String containing the URI of the output data container
+        """
+        container_id = str(uuid.uuid4())
+        container_uri = f"http://data.lblod.info/id/data-container/{container_id}"
+
+        q = Template(
+            get_prefixes_for_query("task", "nfo", "mu") +
+            f"""
+            INSERT DATA {{
+            GRAPH <{GRAPHS["data_containers"]}> {{
+                $container a nfo:DataContainer ;
+                    mu:uuid $uuid ;
+                    task:hasResource $resource .
+            }}
+            }}
+            """
+        ).substitute(
+            container=sparql_escape_uri(container_uri),
+            uuid=sparql_escape_string(container_id),
+            resource=sparql_escape_uri(resource)
+        )
+
+        update(q, sudo=True)
+        return container_uri
+
     def process(self):
         """
         Process NER task by retrieving English translation from database and extracting entities.
@@ -531,36 +615,26 @@ class EntityExtractionTask(DecisionTask):
         self.logger.info(
             f"Processing entity extraction for source: {self.source}")
 
-        # Try to find English expression that realizes the same work
-        english_expression_uri = self.fetch_english_expression_uri()
+        eli_expressions = self.fetch_eli_expressions()
 
-        if english_expression_uri:
-            # Use English expression for NER
-            self.logger.info(
-                f"Found English expression {english_expression_uri}, using it for NER")
-            english_text = self.fetch_expression_data(english_expression_uri)
-            target_expression_uri = english_expression_uri
-        else:
-            # Fallback to original expression if no English translation available
-            self.logger.warning(
-                f"No English expression found, using original expression {self.source} for NER")
-            english_text = self.fetch_data()
-            target_expression_uri = self.source
+        for i in range(len(eli_expressions["expression_uris"])):
+            target_expression_uri = eli_expressions["expression_uris"][i]
+            target_english_text = eli_expressions["expression_contents"][i]
 
-        if not english_text or not english_text.strip():
-            self.logger.warning("No content available for entity extraction")
-            return
+            if not target_english_text or not target_english_text.strip():
+                self.logger.warning(
+                    "No content available for entity extraction")
+                return
 
-        # Extract title using LLM-based title extraction on the English text
-        title_entities = extract_entities(
-            english_text, language="en", method="title")
-        self.create_title_relation(target_expression_uri, title_entities)
+            # Extract general entities (DATE, etc.) on the English text
+            general_entities = self.extract_general_entities(
+                target_english_text, language="en")
+            entity_uris = self.create_general_entity_annotations(
+                target_expression_uri, general_entities)
 
-        # Extract general entities (DATE, etc.) on the English text
-        general_entities = self.extract_general_entities(
-            english_text, language="en")
-        self.create_general_entity_annotations(
-            target_expression_uri, general_entities)
+            for entity_uri in entity_uris:
+                self.results_container_uris.append(
+                    self.create_output_container(entity_uri))
 
 
 class ModelAnnotatingTask(DecisionTask):
@@ -1083,14 +1157,14 @@ class TranslationTask(DecisionTask):
             INSERT DATA {{
             GRAPH <{GRAPHS["data_containers"]}> {{
                 $container a nfo:DataContainer ;
-                    mu:uuid "$uuid" ;
+                    mu:uuid $uuid ;
                     task:hasResource $resource .
             }}
             }}
             """
         ).substitute(
             container=sparql_escape_uri(container_uri),
-            uuid=container_id,
+            uuid=sparql_escape_string(container_id),
             resource=sparql_escape_uri(resource)
         )
 
