@@ -322,7 +322,7 @@ class GeoExtractionTask(DecisionTask):
         self.apply_geo_entities(task_data)
 
 
-class EntityExtractionTask(DecisionTask):
+class EntityExtractionTask(Task):
     """Task that extracts named entities from text."""
 
     __task_type__ = TASK_OPERATIONS["entity_extraction"]
@@ -612,14 +612,14 @@ class EntityExtractionTask(DecisionTask):
         Process NER task by retrieving English translation from database and extracting entities.
         Assumes TranslationTask has already run and created the English expression.
         """
-        self.logger.info(
-            f"Processing entity extraction for source: {self.source}")
-
         eli_expressions = self.fetch_eli_expressions()
 
         for i in range(len(eli_expressions["expression_uris"])):
             target_expression_uri = eli_expressions["expression_uris"][i]
             target_english_text = eli_expressions["expression_contents"][i]
+
+            self.logger.info(
+                f"Processing entity extraction for source: {target_expression_uri}")
 
             if not target_english_text or not target_english_text.strip():
                 self.logger.warning(
@@ -886,7 +886,7 @@ class ClassifierTrainingTask(Task, ABC):
         return results
 
 
-class TranslationTask(DecisionTask):
+class TranslationTask(Task):
     """Task that translates text to a target language using a configurable translation provider."""
 
     __task_type__ = TASK_OPERATIONS["translation"]
@@ -1254,7 +1254,7 @@ class TranslationTask(DecisionTask):
 
 
 # SegmentationTask and its variants both follow the same pattern: fetch text, run segmentor, store spans as annotations.
-class SegmentationTask(DecisionTask):
+class SegmentationTask(Task):
     """Run the marked segmentation model and store segment spans as annotations."""
 
     __task_type__ = TASK_OPERATIONS["segmentation"]
@@ -1509,13 +1509,15 @@ class SegmentationTask(DecisionTask):
         Fetch English text through original expression (if translation available),
         run the segmentor, and save annotations on the English expression.
         """
-        self.logger.info(f"Processing segmentation for {self.source}")
 
         eli_expressions = self.fetch_eli_expressions()
 
         for i in range(len(eli_expressions["expression_uris"])):
             target_expression_uri = eli_expressions["expression_uris"][i]
             target_english_text = eli_expressions["expression_contents"][i]
+
+            self.logger.info(
+                f"Processing segmentation for {target_expression_uri}")
 
             if not target_english_text or not target_english_text.strip():
                 self.logger.warning("No content available for segmentation")
