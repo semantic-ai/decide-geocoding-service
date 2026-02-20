@@ -1382,20 +1382,30 @@ class SegmentationTask(DecisionTask):
                 max_new_tokens=seg_config.max_new_tokens,
             )
 
-    def create_segment_annotations(self, source_uri: str, segments: list[dict[str, Any]]):
+    def create_segment_annotations(self, source_uri: str, segments: list[dict[str, Any]]) -> list[str]:
         """
         Store segment spans as TripletAnnotation.
         Creates rdf:Statement with subject=expression, predicate=segment_type, object=segment_text.
+
+        Args:
+            source_uri: URI of the expression being segmented
+            segments: List of segment dicts, each containing 'label', 'text', 'start', 'end'
+
+        Returns:
+            List of URIs of the created segment annotations
         """
+        segment_uris = []
+
         for segment in segments:
-            segment_label = segment.get('label', 'UNKNOWN')
+            segment_label = segment.get(
+                'label', 'UNKNOWN').replace(" ", "_").lower()
             segment_text = segment.get('text', '')
 
             # Use segment label as predicate (e.g., "ex:TITLE", "ex:PARTICIPANTS")
             # Convert to proper predicate format
             predicate = f"ex:{segment_label}"
 
-            TripletAnnotation(
+            segment_uri = TripletAnnotation(
                 subject=source_uri,
                 predicate=predicate,
                 obj=sparql_escape_string(segment_text),
@@ -1407,8 +1417,92 @@ class SegmentationTask(DecisionTask):
                 agent_type=AGENT_TYPES["ai_component"],
                 confidence=1.0
             ).add_to_triplestore()
+            segment_uris.append(segment_uri)
+
             self.logger.info(
                 f"Created segment annotation for '{segment_label}' at [{segment.get('start')}:{segment.get('end')}] with text: '{segment_text[:50]}...'")
+
+        return segment_uris
+
+    def fetch_eli_expressions(self) -> dict[str, list[str]]:
+        """
+        Retrieve the ELI expressions and their contents from the task's input container.
+        Note that these will be the translated expressions.
+
+        Returns:
+            Dictionary containing:
+                - "expression_uris": list containing the expression URIs
+                - "expression_contents": list containing the expression contents
+        """
+        q = Template(
+            get_prefixes_for_query("task", "epvoc", "eli") +
+            f"""
+            SELECT ?expression ?content WHERE {{
+            GRAPH <{GRAPHS["jobs"]}> {{
+                $task task:inputContainer ?container .
+            }}
+
+            GRAPH <{GRAPHS["data_containers"]}> {{
+                ?container task:hasResource ?expression .
+            }}
+
+            GRAPH <{GRAPHS["expressions"]}> {{
+                ?expression a eli:Expression ;
+                            epvoc:expressionContent ?content .
+            }}            
+            }}
+            """
+        ).substitute(task=sparql_escape_uri(self.task_uri))
+
+        bindings = query(q, sudo=True).get("results", {}).get("bindings", [])
+        if not bindings:
+            self.logger.warning(
+                f"No expressions found in input container for task {self.task_uri}")
+            return {
+                "expression_uris": [],
+                "expression_contents": []
+            }
+
+        expression_uris = [b["expression"]["value"] for b in bindings]
+        expression_contents = [b["content"]["value"] for b in bindings]
+
+        return {
+            "expression_uris": expression_uris,
+            "expression_contents": expression_contents
+        }
+
+    def create_output_container(self, resource: str) -> str:
+        """
+        Function to create an output data container for the translated ELI expression.
+
+        Args:
+            resource: String containing the URI of the translated ELI expression.
+
+        Returns:
+            String containing the URI of the output data container
+        """
+        container_id = str(uuid.uuid4())
+        container_uri = f"http://data.lblod.info/id/data-container/{container_id}"
+
+        q = Template(
+            get_prefixes_for_query("task", "nfo", "mu") +
+            f"""
+            INSERT DATA {{
+            GRAPH <{GRAPHS["data_containers"]}> {{
+                $container a nfo:DataContainer ;
+                    mu:uuid $uuid ;
+                    task:hasResource $resource .
+            }}
+            }}
+            """
+        ).substitute(
+            container=sparql_escape_uri(container_uri),
+            uuid=sparql_escape_string(container_id),
+            resource=sparql_escape_uri(resource)
+        )
+
+        update(q, sudo=True)
+        return container_uri
 
     def process(self):
         """
@@ -1417,29 +1511,28 @@ class SegmentationTask(DecisionTask):
         """
         self.logger.info(f"Processing segmentation for {self.source}")
 
-        # Try to find English expression that realizes the same work
-        english_expression_uri = self.fetch_english_expression_uri()
+        eli_expressions = self.fetch_eli_expressions()
 
-        if english_expression_uri:
-            # Use English expression for segmentation
-            self.logger.info(
-                f"Found English expression {english_expression_uri}, using it for segmentation")
-            task_data = self.fetch_expression_data(english_expression_uri)
-            target_expression_uri = english_expression_uri
-        else:
-            # Fallback to original expression if no English translation available
-            self.logger.info(
-                f"No English expression found, using original expression {self.source}")
-            task_data = self.fetch_data()
-            target_expression_uri = self.source
+        for i in range(len(eli_expressions["expression_uris"])):
+            target_expression_uri = eli_expressions["expression_uris"][i]
+            target_english_text = eli_expressions["expression_contents"][i]
 
-        if not task_data or not task_data.strip():
-            self.logger.warning("No content available for segmentation")
-            return
+            if not target_english_text or not target_english_text.strip():
+                self.logger.warning("No content available for segmentation")
+                return
 
-        segmentor = self._create_segmentor()
-        segments = segmentor.segment(task_data)
-        self.logger.info(f"Segmentor returned {len(segments)} segments")
+            segmentor = self._create_segmentor()
+            segments = segmentor.segment(target_english_text)
+            self.logger.info(f"Segmentor returned {len(segments)} segments")
 
-        # Save annotations on the target expression (English if available, otherwise original)
-        self.create_segment_annotations(target_expression_uri, segments)
+            # Save annotations on the target expression (English if available, otherwise original)
+            segment_uris = self.create_segment_annotations(
+                target_expression_uri, segments)
+
+            for segment_uri in segment_uris:
+                self.results_container_uris.append(
+                    self.create_output_container(segment_uri))
+
+            # Add expression again as input for the following NER task
+            self.results_container_uris.append(
+                self.create_output_container(target_expression_uri))
