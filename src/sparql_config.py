@@ -6,6 +6,9 @@ the codebase. By maintaining these in one place, updates to URIs or prefixes onl
 need to be made once, reducing maintenance burden and preventing inconsistencies.
 """
 
+import os
+from helpers import log
+
 # ==============================================================================
 # SPARQL NAMESPACE PREFIXES
 # ==============================================================================
@@ -31,15 +34,16 @@ SPARQL_PREFIXES = {
     "xsd": "http://www.w3.org/2001/XMLSchema#",
     "skos": "http://www.w3.org/2004/02/skos/core#",
     "adms": "http://www.w3.org/ns/adms#",
-    "task": "http://lblod.data.gift/vocabularies/tasks/",
+    "task": "http://redpencil.data.gift/vocabularies/tasks/",
     "nfo": "http://www.semanticdesktop.org/ontologies/2007/03/22/nfo#",
     "eli": "http://data.europa.eu/eli/ontology#",
-    "eli-dl": "http://data.europa.eu/eli/eli-dl#",
-    "epvoc": "https://data.europarl.europa.eu/def/epvoc#",
     "ns1": "http://www.w3.org/ns/dqv#",
     "ns2": "https://w3id.org/okn/o/sd#",
     "ns3": "https://w3id.org/airo#",
     "schema": "https://schema.org/",
+    "epvoc": "https://data.europarl.europa.eu/def/epvoc#",
+    "nie": "http://www.semanticdesktop.org/ontologies/2007/01/19/nie#",
+    "harvesting": "http://lblod.data.gift/vocabularies/harvesting/"
 }
 
 # ==============================================================================
@@ -47,11 +51,24 @@ SPARQL_PREFIXES = {
 # ==============================================================================
 # Named graphs in the RDF store
 
+TARGET_GRAPH = os.getenv("TARGET_GRAPH", None)
+PUBLICATION_GRAPH = os.getenv("PUBLICATION_GRAPH", None)
+
 GRAPHS = {
-    "ai": "http://mu.semte.ch/graphs/ai",
-    "jobs": "http://mu.semte.ch/graphs/jobs",
-    "oparl_temp": "http://mu.semte.ch/graphs/oparl-temp",
-    "oslo_temp": "http://mu.semte.ch/graphs/oslo-temp",
+    # INPUT GRAPHS
+    "jobs": TARGET_GRAPH if TARGET_GRAPH else "http://mu.semte.ch/graphs/jobs",
+    "data_containers": TARGET_GRAPH if TARGET_GRAPH else "http://mu.semte.ch/graphs/data-containers",
+    "harvest_collections": TARGET_GRAPH if TARGET_GRAPH else "http://mu.semte.ch/graphs/harvest-collections",
+    "remote_objects": TARGET_GRAPH if TARGET_GRAPH else "http://mu.semte.ch/graphs/remote-objects",
+    "files": TARGET_GRAPH if TARGET_GRAPH else "http://mu.semte.ch/graphs/files",
+    "oparl_temp": TARGET_GRAPH if TARGET_GRAPH else "http://mu.semte.ch/graphs/oparl-temp",
+    "oslo_temp": TARGET_GRAPH if TARGET_GRAPH else "http://mu.semte.ch/graphs/oslo-temp",
+    # OUTPUT GRAPHS
+    "expressions": PUBLICATION_GRAPH if PUBLICATION_GRAPH else "http://mu.semte.ch/graphs/expressions",
+    "works": PUBLICATION_GRAPH if PUBLICATION_GRAPH else "http://mu.semte.ch/graphs/works",
+    "manifestations": PUBLICATION_GRAPH if PUBLICATION_GRAPH else "http://mu.semte.ch/graphs/manifestations",
+    "ai": PUBLICATION_GRAPH if PUBLICATION_GRAPH else "http://mu.semte.ch/graphs/ai",
+
 }
 
 # ==============================================================================
@@ -144,18 +161,19 @@ ONTOLOGY_CLASSES = {
 # HELPER FUNCTIONS
 # ==============================================================================
 
+
 def get_prefix_section() -> str:
     """
     Generate a complete SPARQL PREFIX section as a string.
-    
+
     Returns:
         A string containing all PREFIX declarations suitable for prepending
         to SPARQL queries.
-        
+
     Example:
         >>> query = get_prefix_section() + "SELECT ?s WHERE { ... }"
     """
-    lines = ["PREFIX {0}: <{1}>".format(prefix, uri) 
+    lines = ["PREFIX {0}: <{1}>".format(prefix, uri)
              for prefix, uri in SPARQL_PREFIXES.items()]
     return "\n".join(lines) + "\n"
 
@@ -163,13 +181,13 @@ def get_prefix_section() -> str:
 def get_prefixes_for_query(*prefix_names: str) -> str:
     """
     Generate a SPARQL PREFIX section for only the specified prefixes.
-    
+
     Args:
         *prefix_names: Variable number of prefix names to include
-        
+
     Returns:
         A string containing the requested PREFIX declarations
-        
+
     Example:
         >>> query = get_prefixes_for_query("oa", "prov", "mu")
         >>> query += "SELECT ?s WHERE { ... }"
@@ -182,3 +200,7 @@ def get_prefixes_for_query(*prefix_names: str) -> str:
     if not lines:
         raise ValueError(f"No valid prefixes found in: {prefix_names}")
     return "\n".join(lines) + "\n"
+
+
+def prefixed_log(message: str):
+    log(f"APP: {message}")
