@@ -216,6 +216,12 @@ class SegmentationConfig(BaseModel):
         description="Generation temperature (lower = more deterministic)"
     )
 
+    max_gap: int = Field(
+        default=5,
+        description="Maximum character gap allowed when projecting segments back to original text. "
+    )
+    
+
 
 class AppConfig(BaseModel):
     """Root application configuration model."""

@@ -24,7 +24,8 @@ from .llm_models.llm_model_clients import OpenAIModel
 from .llm_models.llm_task_models import LlmTaskInput, EntityLinkingTaskOutput
 from .classifier.train import train
 
-
+# Projection utilities for Segments and Entity alignment
+from .library.entity_projections import project_spans
 
 class Task(ABC):
     """Base class for background tasks that process data from the triplestore."""
@@ -138,7 +139,6 @@ class Task(ABC):
         """Process task data (implemented by subclasses)."""
         pass
 
-
 class DecisionTask(Task, ABC):
     """Task that processes decision-making data with input and output containers."""
     
@@ -234,7 +234,6 @@ class DecisionTask(Task, ABC):
 
         self.logger.warning(f"No eli:realizes work found for expression {self.source}")
         return None
-
 
 class GeoExtractionTask(DecisionTask):
     """Task that geocodes location information from text."""
@@ -356,6 +355,8 @@ class EntityExtractionTask(DecisionTask):
         ).add_to_triplestore()
 
     def create_title_relation(self, source_uri: str, entities: list[dict[str, Any]]):
+        print(f"[TITLE] subject: {self.source}; source_uri: {source_uri}")
+
         for entity in entities:
             if entity['label'] == 'TITLE':
                 TripletAnnotation(
@@ -378,6 +379,8 @@ class EntityExtractionTask(DecisionTask):
         Only entities with a configured mapping are saved. If a label is unmapped
         (or mapped to an empty string), the entity is skipped.
         """
+        print(f"[GENERAL ENTITIES] subject: {self.source}; source_uri: {source_uri}")
+
         config = get_config()
         label_to_predicate = config.ner.label_to_predicate or {}
 
@@ -518,11 +521,20 @@ class EntityExtractionTask(DecisionTask):
         # Extract title using LLM-based title extraction on the English text
         title_entities = extract_entities(english_text, language="en", method="title")
         self.create_title_relation(english_expression_uri, title_entities)
+        
+        #Project title onto original expression as well, if found
+        if title_entities: 
+            title_entities_projected = project_spans(english_text,original_text,title_entities)
+            self.create_title_relation(self.source, title_entities_projected)
 
         # Extract general entities (DATE, etc.) on the English text
         general_entities = self.extract_general_entities(english_text, language="en")
         self.create_general_entity_annotations(english_expression_uri, general_entities)
 
+        # Project general entities back onto the original expression as well
+        if general_entities:
+            general_entities_projected = project_spans(english_text,original_text,general_entities)
+            self.create_general_entity_annotations(self.source, general_entities_projected)
 
 class ModelAnnotatingTask(DecisionTask):
     """Task that links the correct code from a list to text."""
@@ -616,7 +628,6 @@ class ModelAnnotatingTask(DecisionTask):
             )
             annotation.add_to_triplestore()
 
-
 class ModelBatchAnnotatingTask(Task, ABC):
     """Task that creates ModelAnnotatingTasks for all decisions that are not yet annotated."""
 
@@ -656,7 +667,6 @@ class ModelBatchAnnotatingTask(Task, ABC):
 
         return decision_uris
     
-
 class ClassifierTrainingTask(Task, ABC):
     """Task that trains a classifier for the available annotations in the triple store."""
 
@@ -765,7 +775,6 @@ class ClassifierTrainingTask(Task, ABC):
             })
 
         return results
-
 
 class TranslationTask(DecisionTask):
     """Task that translates text to a target language using a configurable translation provider."""
@@ -1011,7 +1020,6 @@ class TranslationTask(DecisionTask):
         
         self.logger.info(f"Translation stored as new expression: {translated_expression_uri}")
 
-
 # SegmentationTask and its variants both follow the same pattern: fetch text, run segmentor, store spans as annotations.
 class SegmentationTask(DecisionTask):
     """Run the marked segmentation model and store segment spans as annotations."""
@@ -1148,7 +1156,8 @@ class SegmentationTask(DecisionTask):
             
             # Use segment label as predicate (e.g., "ex:TITLE", "ex:PARTICIPANTS")
             # Convert to proper predicate format
-            predicate = f"ex:{segment_label}"
+            safe_label = segment_label.replace(" ", "_")
+            predicate = f"ex:{safe_label}"
             
             TripletAnnotation(
                 subject=source_uri,
@@ -1170,7 +1179,11 @@ class SegmentationTask(DecisionTask):
         run the segmentor, and save annotations on the English expression.
         """
         self.logger.info(f"Processing segmentation for {self.source}")
-        
+
+        # Fetch the original text
+        original_text = self.fetch_data()
+        self.logger.info(f"Original text length: {len(original_text) if original_text else 0}")
+
         # Try to find English expression that realizes the same work
         english_expression_uri = self.fetch_english_expression_uri()
         
@@ -1182,7 +1195,7 @@ class SegmentationTask(DecisionTask):
         else:
             # Fallback to original expression if no English translation available
             self.logger.info(f"No English expression found, using original expression {self.source}")
-            task_data = self.fetch_data()
+            task_data = original_text
             target_expression_uri = self.source
         
         if not task_data or not task_data.strip():
@@ -1195,4 +1208,13 @@ class SegmentationTask(DecisionTask):
         
         # Save annotations on the target expression (English if available, otherwise original)
         self.create_segment_annotations(target_expression_uri, segments)
+
+        # Project segments back onto original expression if we segmented the English translation
+        if english_expression_uri:
+            self.logger.info("Projecting segments back to original expression")
+            seg_config = get_config().segmentation
+            projected_segments = project_spans(task_data, original_text, segments, max_gap=seg_config.max_gap)
+            self.logger.info(f"Projected {len(projected_segments)} segments back to original expression")
+            self.create_segment_annotations(self.source, projected_segments)
+
 
