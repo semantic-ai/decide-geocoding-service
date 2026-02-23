@@ -74,9 +74,10 @@ class Task(ABC):
                 "Unknown task type {0}".format(b['taskType']['value']))
         raise RuntimeError("Task with uri {0} not found".format(task_uri))
 
-    def change_state(self, old_state: str, new_state: str) -> None:
-        """Update the task status in the triplestore."""
-
+    def change_state(self, new_state: str) -> None:
+        """Update the task status in the triplestore.
+        Always deletes any existing status before inserting the new one,
+        avoiding duplicate statuses if the task had an unexpected state."""
         # Update the task status
         status_query = Template(
             get_prefixes_for_query("task", "adms") +
@@ -94,7 +95,6 @@ class Task(ABC):
             WHERE {
             GRAPH <""" + GRAPHS["jobs"] + """> {
                 BIND($task AS ?task)
-                BIND(<$old_status> AS ?oldStatus)
                 OPTIONAL { ?task adms:status ?oldStatus . }
             }
             }
@@ -102,7 +102,6 @@ class Task(ABC):
         )
         query_string = status_query.substitute(
             new_status=JOB_STATUSES[new_state],
-            old_status=JOB_STATUSES[old_state],
             task=sparql_escape_uri(self.task_uri)
         )
 
@@ -139,15 +138,15 @@ class Task(ABC):
     @contextlib.contextmanager
     def run(self):
         """Context manager for task execution with state transitions."""
-        self.change_state("scheduled", "busy")
+        self.change_state("busy")
         try:
             yield
-            self.change_state("busy", "success")
+            self.change_state("success")
         except Exception as e:
             self.logger.error(
                 f"Task {self.task_uri} failed: {type(e).__name__}: {str(e)}", exc_info=True)
             try:
-                self.change_state("busy", "failed")
+                self.change_state("failed")
             except Exception as state_error:
                 self.logger.error(
                     f"Failed to update task {self.task_uri} status to failed: {state_error}")
