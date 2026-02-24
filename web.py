@@ -1,8 +1,8 @@
-import json
 import logging
 import time
 
 from src.airo import register_airo
+from src.job import fail_busy_and_scheduled_tasks
 from src.task import Task
 from src.translation_plugin_etranslation import _callback_storage, _callback_lock
 from src.sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS
@@ -16,11 +16,13 @@ from pydantic import BaseModel
 @app.on_event("startup")
 async def startup_event():
     wait_for_triplestore()
+    fail_busy_and_scheduled_tasks()
     register_airo()
     process_open_tasks()
 
 
 router = APIRouter()
+
 
 class NotificationResponse(BaseModel):
     status: str
@@ -36,6 +38,7 @@ async def delta(background_tasks: BackgroundTasks) -> NotificationResponse:
     background_tasks.add_task(process_open_tasks)
     return NotificationResponse(status="accepted", message="Processing started")
 
+
 def wait_for_triplestore():
     triplestore_live = False
     log("Waiting for triplestore...")
@@ -46,7 +49,7 @@ def wait_for_triplestore():
                 SELECT ?s WHERE {
                 ?s ?p ?o.
                 } LIMIT 1""",
-            sudo=True)
+                sudo=True)
             if result["results"]["bindings"][0]["s"]["value"]:
                 triplestore_live = True
             else:
@@ -55,6 +58,7 @@ def wait_for_triplestore():
             log("Triplestore not live yet, retrying...")
             time.sleep(1)
     log("Triplestore ready!")
+
 
 def process_open_tasks():
     logger = logging.getLogger(__name__)
@@ -72,7 +76,8 @@ def process_open_tasks():
 
 def get_one_open_task() -> str | None:
     # Format VALUES clause properly - each URI on its own line, properly escaped
-    operations = "\n                ".join(sparql_escape_uri(value) for value in TASK_OPERATIONS.values())
+    operations = "\n                ".join(
+        sparql_escape_uri(value) for value in TASK_OPERATIONS.values())
     q = f"""
         {get_prefixes_for_query("task", "adms")}
         SELECT ?task WHERE {{
@@ -147,7 +152,8 @@ async def etranslation_callback(request: Request):
                 data.get("errorCode"),
             )
         else:
-            logger.warning("Failure callback without valid requestId: %s", data)
+            logger.warning(
+                "Failure callback without valid requestId: %s", data)
 
         return {"status": "received"}
 
@@ -167,13 +173,15 @@ async def etranslation_callback(request: Request):
         try:
             req_id_int = int(request_id)
         except (TypeError, ValueError):
-            logger.warning("Callback with non-integer requestId: %s", request_id)
+            logger.warning(
+                "Callback with non-integer requestId: %s", request_id)
             return {"status": "ignored"}
 
         key = (req_id_int, str(target_lang).upper())
         with _callback_lock:
             _callback_storage[key] = data
-        logger.info("Callback: requestId=%s, target=%s", request_id, target_lang)
+        logger.info("Callback: requestId=%s, target=%s",
+                    request_id, target_lang)
         return {"status": "received"}
 
     if request_id:
@@ -189,9 +197,9 @@ async def etranslation_callback(request: Request):
         key = (req_id_int, "UNKNOWN")
         with _callback_lock:
             _callback_storage[key] = data
-        logger.warning("Callback without targetLanguage: requestId=%s", request_id)
+        logger.warning(
+            "Callback without targetLanguage: requestId=%s", request_id)
         return {"status": "received"}
 
     logger.warning("Callback without requestId: %s", data)
     return {"status": "ignored"}
-
