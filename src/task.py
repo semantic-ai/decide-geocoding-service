@@ -1150,7 +1150,14 @@ class TranslationTask(Task):
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore()
 
-    def create_translated_expression(self, translated_text: str, target_language: str, work_uri: str) -> str:
+    def create_translated_expression(
+        self,
+        translated_text: str,
+        target_language: str,
+        work_uri: str,
+        source_expression_uri: str,
+        graph_uri: Optional[str] = None
+    ) -> str:
         """
         Create an eli:Expression resource for the translated text and
         link it to the same work as the source expression when available.
@@ -1159,12 +1166,14 @@ class TranslationTask(Task):
             translated_text: The translated content
             target_language: Target language code (e.g., 'en', 'nl', 'de')
             work_uri: The URI of the work that the translated expression realizes
+            source_expression_uri: The original expression URI used as provenance source
+            graph_uri: Optional graph where translated expression is stored
 
         Returns:
             URI of the created translated expression
         """
         translated_expr_uri = f"http://example.org/{uuid4()}"
-        graph_uri = self.source_graph or GRAPHS["ai"]
+        target_graph_uri = graph_uri or GRAPHS["ai"]
 
         realizes_triple = ""
         if work_uri:
@@ -1174,7 +1183,7 @@ class TranslationTask(Task):
             get_prefixes_for_query("eli", "epvoc") +
             f"""
             INSERT {{
-              GRAPH <{graph_uri}> {{
+              GRAPH <{target_graph_uri}> {{
                 {sparql_escape_uri(translated_expr_uri)} a eli:Expression ;
                     epvoc:expressionContent {sparql_escape_string(translated_text)} .
                 {realizes_triple}
@@ -1193,7 +1202,7 @@ class TranslationTask(Task):
                 predicate="eli:realizes",
                 obj=sparql_escape_uri(work_uri),
                 activity_id=self.task_uri,
-                source_uri=self.source,
+                source_uri=source_expression_uri,
                 start=None,
                 end=None,
                 agent=AI_COMPONENTS["translator"],
@@ -1201,7 +1210,7 @@ class TranslationTask(Task):
             ).add_to_triplestore()
 
         self.logger.info(
-            f"Created translated expression {translated_expr_uri} in graph {graph_uri} (language: {target_language})")
+            f"Created translated expression {translated_expr_uri} in graph {target_graph_uri} (language: {target_language})")
         return translated_expr_uri
 
     def fetch_eli_expressions(self) -> dict[str, list[str]]:
@@ -1307,12 +1316,13 @@ class TranslationTask(Task):
         eli_expressions = self.fetch_eli_expressions()
 
         for i in range(len(eli_expressions["expression_uris"])):
+            source_expression_uri = eli_expressions["expression_uris"][i]
             original_text = eli_expressions["expression_contents"][i]
             source_language = LANGUAGE_URI_TO_CODE.get(
                 eli_expressions["languages"][i], None)
             work_uri = eli_expressions["work_uris"][i]
             self.logger.info(
-                f"Processing translation for source: {self.source}")
+                f"Processing translation for source: {source_expression_uri}")
 
             # If there's no content, skip early
             if not original_text or not original_text.strip():
@@ -1367,7 +1377,11 @@ class TranslationTask(Task):
             # Create a new eli:Expression for the translated text
             normalized_target_lang = self.target_language.lower()
             translated_expression_uri = self.create_translated_expression(
-                translated_text, normalized_target_lang, work_uri)
+                translated_text,
+                normalized_target_lang,
+                work_uri,
+                source_expression_uri
+            )
 
             # Annotate the translated expression with its language
             self.create_language_relation(
