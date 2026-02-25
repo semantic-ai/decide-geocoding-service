@@ -212,6 +212,7 @@ class Task(ABC):
         """
         Resolve the original/source expression URI + text for a translated expression.
         Falls back to the translated expression itself if no source can be resolved.
+        Does not mutate task-level source state.
         """
         source_uri: Optional[str] = None
 
@@ -268,8 +269,6 @@ class Task(ABC):
 
         if not source_uri:
             source_uri = translated_expression_uri
-
-        self.source = source_uri  # optional convenience for existing logging/debug prints
 
         if source_uri == translated_expression_uri:
             source_text = translated_text or self.fetch_expression_data(source_uri)
@@ -1530,8 +1529,8 @@ class SegmentationTask(Task):
 
             # Use segment label as predicate (e.g., "ex:TITLE", "ex:PARTICIPANTS")
             # Convert to proper predicate format
-            safe_label = segment_label.replace(" ", "_")
-            predicate = f"ex:{safe_label}"
+
+            predicate = f"ex:{segment_label}"
             segment_uri = TripletAnnotation(
                 subject=source_uri,
                 predicate=predicate,
