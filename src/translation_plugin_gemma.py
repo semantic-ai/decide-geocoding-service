@@ -5,6 +5,7 @@ Uses javdrher/decide-gemma3-270m model for translation.
 
 import json
 import logging
+import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from translatepy.translators.base import BaseTranslator
@@ -31,9 +32,14 @@ class GemmaTranslateService(BaseTranslator):
         """Load Gemma model and tokenizer."""
         if self._model is None or self._tokenizer is None:
             self.logger.info(f"Loading translation model: {self._model_name}")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
             self._tokenizer = AutoTokenizer.from_pretrained(self._model_name, trust_remote_code=True)
-            self._model = AutoModelForCausalLM.from_pretrained(self._model_name, trust_remote_code=True, device_map="cpu")
-            self.logger.info("Model loaded")
+            self._model = AutoModelForCausalLM.from_pretrained(
+                self._model_name,
+                trust_remote_code=True,
+                device_map=device
+            )
+            self.logger.info(f"Model loaded on {device}")
     
     def _get_lang_code(self, language):
         """Get ISO 639-1 language code."""
@@ -60,6 +66,8 @@ class GemmaTranslateService(BaseTranslator):
     def _translate(self, text: str, destination_language: str, source_language: str = "auto") -> str:
         """Translate text using Gemma model."""
         self._load_model()
+        
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         
         src_lang = self._get_lang_code(source_language)
         tgt_lang = self._get_lang_code(destination_language)
@@ -100,7 +108,7 @@ Task: Translate all fields of the item in the context to {tgt_lang_name}, except
     "target": "{tgt_lang_name}"}}<end_of_turn>
 <start_of_turn>model"""
         
-        inputs = self._tokenizer(prompt, return_tensors="pt").to("cpu")
+        inputs = self._tokenizer(prompt, return_tensors="pt").to(device)
         input_token_count = inputs['input_ids'].shape[1]
         max_new_tokens = int(input_token_count * 1.5)
         

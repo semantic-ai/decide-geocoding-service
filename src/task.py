@@ -25,6 +25,8 @@ from .llm_models.llm_model_clients import OpenAIModel
 from .llm_models.llm_task_models import LlmTaskInput, EntityLinkingTaskOutput
 from .classifier.train import train
 
+# Projection utilities for Segments and Entity alignment
+from .library.entity_projections import project_spans
 
 class Task(ABC):
     """Base class for background tasks that process data from the triplestore."""
@@ -34,6 +36,7 @@ class Task(ABC):
         self.task_uri = task_uri
         self.results_container_uris = []
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.source: Optional[str] = None
 
     @classmethod
     def supported_operations(cls) -> list[Type['Task']]:
@@ -162,6 +165,117 @@ class Task(ABC):
         """Process task data (implemented by subclasses)."""
         pass
 
+    def fetch_expression_data(self, expression_uri: str) -> str:
+        """
+        Retrieve text content for a specific expression URI.
+        """
+        query_template = Template(
+            get_prefixes_for_query("eli", "eli-dl", "dct", "epvoc") +
+            """
+            SELECT DISTINCT ?title ?description ?decision_basis ?content
+            WHERE {
+            GRAPH ?graph {
+                VALUES ?s { $expression }
+                OPTIONAL { ?s eli:title ?title }
+                OPTIONAL { ?s eli:description ?description }
+                OPTIONAL { ?s eli-dl:decision_basis ?decision_basis }
+                OPTIONAL { ?s epvoc:expressionContent ?content }
+            }
+            }
+            """
+        )
+
+        query_result = query(
+            query_template.substitute(expression=sparql_escape_uri(expression_uri)),
+            sudo=True
+        )
+
+        bindings = query_result.get("results", {}).get("bindings", [])
+        texts: list[str] = []
+        seen = set()
+
+        for binding in bindings:
+            for field in ("content", "title", "description", "decision_basis"):
+                value = binding.get(field, {}).get("value")
+                if value and value not in seen:
+                    texts.append(value)
+                    seen.add(value)
+
+        return "\n".join(texts)
+
+
+    def resolve_projection_context(
+        self,
+        translated_expression_uri: str,
+        translated_text: Optional[str] = None
+    ) -> tuple[str, str]:
+        """
+        Resolve the original/source expression URI + text for a translated expression.
+        Falls back to the translated expression itself if no source can be resolved.
+        Does not mutate task-level source state.
+        """
+        source_uri: Optional[str] = None
+
+        # 1) Prefer provenance from TranslationTask's eli:realizes annotation
+        provenance_q = Template(
+            get_prefixes_for_query("oa", "rdf", "eli") +
+            f"""
+            SELECT DISTINCT ?source WHERE {{
+            GRAPH <{GRAPHS["ai"]}> {{
+                ?ann a oa:Annotation ;
+                    oa:motivatedBy oa:linking ;
+                    oa:hasBody ?stmt ;
+                    oa:hasTarget ?target .
+
+                ?stmt a rdf:Statement ;
+                    rdf:subject $translated ;
+                    rdf:predicate eli:realizes ;
+                    rdf:object ?work .
+
+                ?target a oa:SpecificResource ;
+                        oa:source ?source .
+
+                FILTER(?source != $translated)
+            }}
+            }}
+            LIMIT 1
+            """
+        ).substitute(translated=sparql_escape_uri(translated_expression_uri))
+
+        provenance_bindings = query(provenance_q, sudo=True).get("results", {}).get("bindings", [])
+        if provenance_bindings and "source" in provenance_bindings[0]:
+            source_uri = provenance_bindings[0]["source"]["value"]
+
+        # 2) Fallback: any other expression that realizes the same work
+        if not source_uri:
+            fallback_q = Template(
+                get_prefixes_for_query("eli") +
+                """
+                SELECT DISTINCT ?source WHERE {
+                GRAPH ?g {
+                    $translated eli:realizes ?work .
+                    ?source a eli:Expression ;
+                            eli:realizes ?work .
+                    FILTER(?source != $translated)
+                }
+                }
+                LIMIT 1
+                """
+            ).substitute(translated=sparql_escape_uri(translated_expression_uri))
+
+            fallback_bindings = query(fallback_q, sudo=True).get("results", {}).get("bindings", [])
+            if fallback_bindings and "source" in fallback_bindings[0]:
+                source_uri = fallback_bindings[0]["source"]["value"]
+
+        if not source_uri:
+            source_uri = translated_expression_uri
+
+        if source_uri == translated_expression_uri:
+            source_text = translated_text or self.fetch_expression_data(source_uri)
+        else:
+            source_text = self.fetch_expression_data(source_uri)
+
+        return source_uri, source_text
 
 class DecisionTask(Task, ABC):
     """Task that processes decision-making data with input and output containers."""
@@ -261,7 +375,6 @@ class DecisionTask(Task, ABC):
             f"No eli:realizes work found for expression {self.source}")
         return None
 
-
 class GeoExtractionTask(DecisionTask):
     """Task that geocodes location information from text."""
 
@@ -352,6 +465,8 @@ class EntityExtractionTask(Task):
         ).add_to_triplestore()
 
     def create_title_relation(self, source_uri: str, entities: list[dict[str, Any]]):
+        print(f"[TITLE] subject: {self.source}; source_uri: {source_uri}")
+
         for entity in entities:
             if entity['label'] == 'TITLE':
                 TripletAnnotation(
@@ -375,6 +490,8 @@ class EntityExtractionTask(Task):
         Only entities with a configured mapping are saved. If a label is unmapped
         (or mapped to an empty string), the entity is skipped.
         """
+        print(f"[GENERAL ENTITIES] subject: {self.source}; source_uri: {source_uri}")
+
         config = get_config()
         label_to_predicate = config.ner.label_to_predicate or {}
         entity_uris = []
@@ -623,7 +740,7 @@ class EntityExtractionTask(Task):
             if not target_english_text or not target_english_text.strip():
                 self.logger.warning(
                     "No content available for entity extraction")
-                return
+                continue
 
             # Extract general entities (DATE, etc.) on the English text
             general_entities = self.extract_general_entities(
@@ -635,6 +752,19 @@ class EntityExtractionTask(Task):
                 self.results_container_uris.append(
                     self.create_output_container(entity_uri))
 
+            # Projection back to original/source expression
+            if not general_entities:
+                continue
+
+            source_expression_uri, source_text = self.resolve_projection_context(target_expression_uri,translated_text=target_english_text)
+            if not source_text or source_expression_uri == target_expression_uri:
+                continue
+
+            general_entities_projected = project_spans(target_english_text,source_text,general_entities)
+            entity_uris_projected = self.create_general_entity_annotations(source_expression_uri, general_entities_projected)
+            for projected_entity_uri in entity_uris_projected:
+                self.results_container_uris.append(
+                    self.create_output_container(projected_entity_uri))
 
 class ModelAnnotatingTask(DecisionTask):
     """Task that links the correct code from a list to text."""
@@ -732,7 +862,6 @@ class ModelAnnotatingTask(DecisionTask):
             )
             annotation.add_to_triplestore()
 
-
 class ModelBatchAnnotatingTask(Task, ABC):
     """Task that creates ModelAnnotatingTasks for all decisions that are not yet annotated."""
 
@@ -772,8 +901,7 @@ class ModelBatchAnnotatingTask(Task, ABC):
         decision_uris = [b["s"]["value"] for b in bindings if "s" in b]
 
         return decision_uris
-
-
+    
 class ClassifierTrainingTask(Task, ABC):
     """Task that trains a classifier for the available annotations in the triple store."""
 
@@ -1022,7 +1150,14 @@ class TranslationTask(Task):
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore()
 
-    def create_translated_expression(self, translated_text: str, target_language: str, work_uri: str) -> str:
+    def create_translated_expression(
+        self,
+        translated_text: str,
+        target_language: str,
+        work_uri: str,
+        source_expression_uri: str,
+        graph_uri: Optional[str] = None
+    ) -> str:
         """
         Create an eli:Expression resource for the translated text and
         link it to the same work as the source expression when available.
@@ -1031,12 +1166,14 @@ class TranslationTask(Task):
             translated_text: The translated content
             target_language: Target language code (e.g., 'en', 'nl', 'de')
             work_uri: The URI of the work that the translated expression realizes
+            source_expression_uri: The original expression URI used as provenance source
+            graph_uri: Optional graph where translated expression is stored
 
         Returns:
             URI of the created translated expression
         """
         translated_expr_uri = f"http://example.org/{uuid4()}"
-        graph_uri = self.source_graph or GRAPHS["ai"]
+        target_graph_uri = graph_uri or GRAPHS["ai"]
 
         realizes_triple = ""
         if work_uri:
@@ -1046,7 +1183,7 @@ class TranslationTask(Task):
             get_prefixes_for_query("eli", "epvoc") +
             f"""
             INSERT {{
-              GRAPH <{graph_uri}> {{
+              GRAPH <{target_graph_uri}> {{
                 {sparql_escape_uri(translated_expr_uri)} a eli:Expression ;
                     epvoc:expressionContent {sparql_escape_string(translated_text)} .
                 {realizes_triple}
@@ -1065,7 +1202,7 @@ class TranslationTask(Task):
                 predicate="eli:realizes",
                 obj=sparql_escape_uri(work_uri),
                 activity_id=self.task_uri,
-                source_uri=self.source,
+                source_uri=source_expression_uri,
                 start=None,
                 end=None,
                 agent=AI_COMPONENTS["translator"],
@@ -1073,7 +1210,7 @@ class TranslationTask(Task):
             ).add_to_triplestore()
 
         self.logger.info(
-            f"Created translated expression {translated_expr_uri} in graph {graph_uri} (language: {target_language})")
+            f"Created translated expression {translated_expr_uri} in graph {target_graph_uri} (language: {target_language})")
         return translated_expr_uri
 
     def fetch_eli_expressions(self) -> dict[str, list[str]]:
@@ -1179,12 +1316,13 @@ class TranslationTask(Task):
         eli_expressions = self.fetch_eli_expressions()
 
         for i in range(len(eli_expressions["expression_uris"])):
+            source_expression_uri = eli_expressions["expression_uris"][i]
             original_text = eli_expressions["expression_contents"][i]
             source_language = LANGUAGE_URI_TO_CODE.get(
                 eli_expressions["languages"][i], None)
             work_uri = eli_expressions["work_uris"][i]
             self.logger.info(
-                f"Processing translation for source: {self.source}")
+                f"Processing translation for source: {source_expression_uri}")
 
             # If there's no content, skip early
             if not original_text or not original_text.strip():
@@ -1239,7 +1377,11 @@ class TranslationTask(Task):
             # Create a new eli:Expression for the translated text
             normalized_target_lang = self.target_language.lower()
             translated_expression_uri = self.create_translated_expression(
-                translated_text, normalized_target_lang, work_uri)
+                translated_text,
+                normalized_target_lang,
+                work_uri,
+                source_expression_uri
+            )
 
             # Annotate the translated expression with its language
             self.create_language_relation(
@@ -1250,7 +1392,6 @@ class TranslationTask(Task):
 
             self.results_container_uris.append(
                 self.create_output_container(translated_expression_uri))
-
 
 # SegmentationTask and its variants both follow the same pattern: fetch text, run segmentor, store spans as annotations.
 class SegmentationTask(Task):
@@ -1402,8 +1543,8 @@ class SegmentationTask(Task):
 
             # Use segment label as predicate (e.g., "ex:TITLE", "ex:PARTICIPANTS")
             # Convert to proper predicate format
-            predicate = f"ex:{segment_label}"
 
+            predicate = f"ex:{segment_label}"
             segment_uri = TripletAnnotation(
                 subject=source_uri,
                 predicate=predicate,
@@ -1508,7 +1649,6 @@ class SegmentationTask(Task):
         Fetch English text through original expression (if translation available),
         run the segmentor, and save annotations on the English expression.
         """
-
         eli_expressions = self.fetch_eli_expressions()
 
         for i in range(len(eli_expressions["expression_uris"])):
@@ -1520,20 +1660,44 @@ class SegmentationTask(Task):
 
             if not target_english_text or not target_english_text.strip():
                 self.logger.warning("No content available for segmentation")
-                return
+                continue
 
+            # Segment English text
             segmentor = self._create_segmentor()
             segments = segmentor.segment(target_english_text)
             self.logger.info(f"Segmentor returned {len(segments)} segments")
 
-            # Save annotations on the target expression (English if available, otherwise original)
-            segment_uris = self.create_segment_annotations(
-                target_expression_uri, segments)
-
+            segment_uris = self.create_segment_annotations(target_expression_uri, segments)
             for segment_uri in segment_uris:
-                self.results_container_uris.append(
-                    self.create_output_container(segment_uri))
+                self.results_container_uris.append(self.create_output_container(segment_uri))
 
-            # Add expression again as input for the following NER task
+            # pass expression forward to NER task
             self.results_container_uris.append(
-                self.create_output_container(target_expression_uri))
+                self.create_output_container(target_expression_uri)
+            )
+
+            # Project segments back to original/source expression
+            if not segments:
+                continue
+
+            source_expression_uri, source_text = self.resolve_projection_context(
+                target_expression_uri,
+                translated_text=target_english_text,
+            )
+            if source_expression_uri == target_expression_uri:
+                continue
+
+            projected_segments = project_spans(
+                target_english_text,
+                source_text,
+                segments,
+                max_gap=get_config().segmentation.max_gap,
+            )
+
+            projected_segment_uris = self.create_segment_annotations(
+                source_expression_uri, projected_segments
+            )
+            for projected_segment_uri in projected_segment_uris:
+                self.results_container_uris.append(
+                    self.create_output_container(projected_segment_uri)
+                )

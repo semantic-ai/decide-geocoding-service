@@ -6,6 +6,7 @@ This module handles loading and caching of NER models with lazy initialization.
 
 import logging
 import spacy
+import torch
 from typing import Dict, Any
 from transformers import pipeline
 from .ner_config import NER_MODELS
@@ -139,10 +140,11 @@ class ModelManager:
                 # Explicitly load tokenizer and model first
                 print(f"Loading title extraction model: {model_name}")
                 tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+                device = "cuda" if torch.cuda.is_available() else "cpu"
                 model = AutoModelForCausalLM.from_pretrained(
                     model_name, 
                     trust_remote_code=True,
-                    device_map="cpu"
+                    device_map=device
                 )
                 
                 # Create pipeline from the loaded model and tokenizer
@@ -150,7 +152,7 @@ class ModelManager:
                     "text-generation",
                     model=model,
                     tokenizer=tokenizer,
-                    #device="cpu"
+                    device=0 if device == "cuda" else -1
                 )
                 print(f"Successfully loaded title extraction model")
             except Exception as e:
