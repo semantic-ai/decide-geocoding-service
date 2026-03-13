@@ -20,7 +20,17 @@ from .ner_functions import extract_entities
 from .config import get_config
 from .nominatim_geocoder import NominatimGeocoder
 from .annotation import GeoAnnotation, LinkingAnnotation, TripletAnnotation, NERAnnotation
-from .sparql_config import get_prefixes_for_query, GRAPHS, JOB_STATUSES, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES, LANGUAGE_CODE_TO_URI, LANGUAGE_URI_TO_CODE
+from .sparql_config import (
+    get_prefixes_for_query,
+    GRAPHS,
+    JOB_STATUSES,
+    TASK_OPERATIONS,
+    AI_COMPONENTS,
+    AGENT_TYPES,
+    LANGUAGE_CODE_TO_URI,
+    LANGUAGE_URI_TO_CODE,
+)
+from .entity_mappers import map_entity_to_annotations, resolve_work_uri_for_expression
 from .llm_models.llm_model_clients import OpenAIModel
 from .llm_models.llm_task_models import LlmTaskInput, EntityLinkingTaskOutput
 from .classifier.train import train
@@ -464,59 +474,42 @@ class EntityExtractionTask(Task):
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore()
 
-    def create_title_relation(self, source_uri: str, entities: list[dict[str, Any]]):
-        print(f"[TITLE] subject: {self.source}; source_uri: {source_uri}")
-
-        for entity in entities:
-            if entity['label'] == 'TITLE':
-                TripletAnnotation(
-                    subject=source_uri,
-                    predicate="eli:title",
-                    obj=sparql_escape_string(entity['text']),
-                    activity_id=self.task_uri,
-                    source_uri=source_uri,
-                    start=entity['start'],
-                    end=entity['end'],
-                    agent=AI_COMPONENTS["ner_extractor"],
-                    agent_type=AGENT_TYPES["ai_component"]
-                ).add_to_triplestore()
-                self.logger.info(
-                    f"Created Title triplet suggestion for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
-
     def create_general_entity_annotations(self, source_uri: str, entities: list[dict[str, Any]]) -> list[str]:
         """
-        Create triplet suggestions for entities by mapping (refined) labels to RDF predicates.
+        Creates RDF annotations for a list of general entity extraction results using per-label handler logic.
 
-        Only entities with a configured mapping are saved. If a label is unmapped
-        (or mapped to an empty string), the entity is skipped.
+        Args:
+            source_uri (str): The URI of the source expression or resource.
+            entities (list[dict[str, Any]]): List of extracted entities, each being a dictionary
+                with at minimum 'label', 'text', 'start', and 'end' keys.
+
+        Returns:
+            list[str]: List of URIs of the created annotation resources for applicable entities.
         """
         print(f"[GENERAL ENTITIES] subject: {self.source}; source_uri: {source_uri}")
 
-        config = get_config()
-        label_to_predicate = config.ner.label_to_predicate or {}
-        entity_uris = []
+        created_annotation_uris: list[str] = []
+
+        # Resolve the work URI for this expression once (may be None if unknown)
+        work_uri = resolve_work_uri_for_expression(source_uri)
 
         for entity in entities:
-            label = str(entity.get("label", "")).upper()
-            predicate = (label_to_predicate.get(label) or "").strip()
-            if not predicate:
-                continue
+            try:
+                annotation_uris = map_entity_to_annotations(
+                    task=self,
+                    work_uri=work_uri,
+                    expression_uri=source_uri,
+                    entity=entity,
+                )
+                created_annotation_uris.extend(annotation_uris)
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to map entity '{entity.get('text')}' "
+                    f"({entity.get('label')}) for source {source_uri}: {e}",
+                    exc_info=True,
+                )
 
-            entity_uri = TripletAnnotation(
-                subject=source_uri,
-                predicate=predicate,
-                obj=sparql_escape_string(entity["text"]),
-                activity_id=self.task_uri,
-                source_uri=source_uri,
-                start=entity.get("start"),
-                end=entity.get("end"),
-                agent=AI_COMPONENTS["ner_extractor"],
-                agent_type=AGENT_TYPES["ai_component"],
-                confidence=entity.get("confidence", 1.0),
-            ).add_to_triplestore()
-            entity_uris.append(entity_uri)
-
-        return entity_uris
+        return created_annotation_uris
 
     def extract_general_entities(self, task_data: str, language: str = None, method: str = None) -> list[dict[str, Any]]:
         """
