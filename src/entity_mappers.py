@@ -16,10 +16,7 @@ from .annotation import TripletAnnotation
 
 
 def _parse_date_literal(text: str) -> str:
-    """Convert a human date string into a typed xsd:date literal.
-
-    Supports a handful of common formats and falls back to a plain string
-    literal when parsing fails.
+    """Convert a date string into a typed xsd:date literal.
 
     Args:
         text: Raw date text extracted by NER, e.g. 17.09.2021 or 17 September 2021.
@@ -59,12 +56,6 @@ def _parse_date_literal(text: str) -> str:
                     iso = f"{year}-{num}-01"
                     return f"\"{iso}\"^^xsd:date"
 
-    # Try common formats with explicit day; keep this intentionally simple/minimal.
-    # Supports:
-    # - 17.09.2021
-    # - 2021-09-17
-    # - 17/09/2021
-    # - 17 September 2021 / 17 Sep 2021
     for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%d %B %Y", "%d %b %Y"):
         try:
             dt = datetime.strptime(value, fmt)
@@ -124,14 +115,7 @@ def _insert_triples(insert_body: str) -> None:
     update(q, sudo=True)
 
 
-def _annotate(
-    task,
-    subject: str,
-    predicate: str,
-    obj: str,
-    source_uri: str,
-    entity: Dict[str, Any],
-) -> str:
+def _annotate(task,subject: str, predicate: str, obj: str, source_uri: str, entity: Dict[str, Any]) -> str:
     """Create a TripletAnnotation and return its URI."""
     return TripletAnnotation(
         subject=subject,
@@ -147,13 +131,7 @@ def _annotate(
     ).add_to_triplestore()
 
 
-def _create_work_date_annotation(
-    task,
-    work_uri: Optional[str],
-    source_uri: str,
-    entity: Dict[str, Any],
-    predicate_uri: str,
-) -> List[str]:
+def _create_work_date_annotation(task, work_uri: Optional[str], source_uri: str, entity: Dict[str, Any], predicate_uri: str) -> List[str]:
     """Helper to create a single date statement on the work."""
     obj_literal = _parse_date_literal(entity.get("text", ""))
     ann_uri = _annotate(
