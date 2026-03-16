@@ -1,18 +1,4 @@
 from __future__ import annotations
-
-"""
-Entity-to-RDF mapping helpers for EntityExtractionTask.
-
-This module contains small, hardcoded mappers that translate refined NER
-entities into Open Annotation + rdf:Statement structures on top of ELI/ELI-DL.
-
-The goal is to keep the task input/output flow unchanged while making the RDF
-output deterministic and easy to reason about (no config-driven mappings).
-
-Key entry point:
-    map_entity_to_annotations(task, work_uri, expression_uri, entity)
-"""
-
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
