@@ -1,7 +1,7 @@
 from string import Template
 from helpers import update
 from escape_helpers import sparql_escape_uri
-from .sparql_config import get_prefixes_for_query, GRAPHS, ORGANIZATIONS
+from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, ORGANIZATIONS
 
 
 def register_airo():
