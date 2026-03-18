@@ -99,7 +99,8 @@ class EntityExtractionTask(Task):
                 end=entity.get("end"),
                 agent=AI_COMPONENTS["ner_extractor"],
                 agent_type=AGENT_TYPES["ai_component"],
-                confidence=entity.get("confidence", 1.0),
+                confidence=entity.get("confidence", 1.0),                
+                entity_class=label
             ).add_to_triplestore()
             entity_uris.append(entity_uri)
 
