@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from helpers import update, query
-from escape_helpers import sparql_escape_uri, sparql_escape_string
+from escape_helpers import sparql_escape_uri, sparql_escape_string, sparql_escape_date
 
 from .sparql_config import (
     get_prefixes_for_query,
@@ -53,15 +53,12 @@ def _parse_date_literal(text: str) -> str:
         for full_name, num in month_names.items():
             if key == full_name or key == full_name[:3]:
                 if year.isdigit() and len(year) == 4:
-                    iso = f"{year}-{num}-01"
-                    return f"\"{iso}\"^^xsd:date"
+                    return sparql_escape_date(datetime(int(year), int(num), 1).date())
 
     for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%d %B %Y", "%d %b %Y"):
         try:
             dt = datetime.strptime(value, fmt)
-            iso = dt.date().isoformat()
-            # Build typed literal manually (xsd prefix is provided by get_prefixes_for_query)
-            return f"\"{iso}\"^^xsd:date"
+            return sparql_escape_date(dt.date())
         except ValueError:
             continue
 
@@ -106,7 +103,7 @@ def _insert_triples(insert_body: str) -> None:
         )
         + f"""
         INSERT DATA {{
-          GRAPH <{GRAPHS["ai"]}> {{
+          GRAPH {sparql_escape_uri(GRAPHS["ai"])} {{
 {insert_body}
           }}
         }}
@@ -172,7 +169,7 @@ def _get_or_create_session_for_work(task, work_uri: Optional[str]) -> Optional[s
     session_uri = f"https://data.lblod.info/id/session/{uuid.uuid4()}"
 
     insert_body = f"""
-    <{session_uri}> a <http://data.europa.eu/eli/eli-draft-legislation-ontology#Activity> ;
+    {sparql_escape_uri(session_uri)} a eli-dl:Activity ;
         eli-dl:had_activity_type besluit:Zitting .
 """
     _insert_triples(insert_body)
@@ -255,11 +252,12 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
 
     # Context period: create a ProperInterval node and link from work via dct:date
     if label == "CONTEXT_PERIOD":
-        period_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
+        period_id = str(uuid.uuid4())
+        period_uri = f"https://data.lblod.info/id/period/{period_id}"
         begin_literal = _parse_date_literal(entity.get("text", ""))
         end_literal = begin_literal  # minimal: same date for start/end
         insert_body = f"""
-    <{period_uri}> a <http://www.w3.org/2006/time#ProperInterval> ;
+    {sparql_escape_uri(period_uri)} a <http://www.w3.org/2006/time#ProperInterval> ;
         <http://www.w3.org/2006/time#hasBeginning> {begin_literal} ;
         <http://www.w3.org/2006/time#hasEnd> {end_literal} .
 """
@@ -288,14 +286,14 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         begin_literal = _parse_date_literal(entity.get("text", ""))
         end_literal = begin_literal
         insert_body = f"""
-    <{period_uri}> a <http://www.w3.org/2006/time#ProperInterval> ;
+    {sparql_escape_uri(period_uri)} a <http://www.w3.org/2006/time#ProperInterval> ;
         <http://www.w3.org/2006/time#hasBeginning> {begin_literal} ;
         <http://www.w3.org/2006/time#hasEnd> {end_literal} ;
-        mu:uuid "{period_id}" .
+        mu:uuid {sparql_escape_string(period_id)} .
 
-    <{nb_uri}> a <https://data.vlaanderen.be/ns/omgevingsvergunning#NormatieveBepaling> ;
-        mu:uuid "{nb_id}" ;
-        <http://purl.org/dc/terms/extent> <{period_uri}> .
+    {sparql_escape_uri(nb_uri)} a <https://data.vlaanderen.be/ns/omgevingsvergunning#NormatieveBepaling> ;
+        mu:uuid {sparql_escape_string(nb_id)} ;
+        dct:extent {sparql_escape_uri(period_uri)} .
 """
         _insert_triples(insert_body)
 
@@ -366,8 +364,8 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         person_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
         name_literal = sparql_escape_string(entity.get("text", ""))
         insert_body = f"""
-    <{person_uri}> a <http://xmlns.com/foaf/0.1/Person> ;
-        <http://www.w3.org/2000/01/rdf-schema#label> {name_literal} .
+    {sparql_escape_uri(person_uri)} a foaf:Person ;
+        rdfs:label {name_literal} .
 """
         _insert_triples(insert_body)
 
@@ -398,8 +396,8 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         cited_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
         label_literal = sparql_escape_string(entity.get("text", ""))
         insert_body = f"""
-    <{cited_uri}> a <http://data.europa.eu/eli/ontology#Work> ;
-        <http://www.w3.org/2000/01/rdf-schema#label> {label_literal} .
+    {sparql_escape_uri(cited_uri)} a eli:Work ;
+        rdfs:label {label_literal} .
 """
         _insert_triples(insert_body)
 
@@ -419,8 +417,8 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         org_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
         label_literal = sparql_escape_string(entity.get("text", ""))
         insert_body = f"""
-    <{org_uri}> a <http://www.w3.org/ns/org#Organization> ;
-        <http://www.w3.org/2000/01/rdf-schema#label> {label_literal} .
+    {sparql_escape_uri(org_uri)} a <http://www.w3.org/ns/org#Organization> ;
+        rdfs:label {label_literal} .
 """
         _insert_triples(insert_body)
 
@@ -440,8 +438,8 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         loc_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
         label_literal = sparql_escape_string(entity.get("text", ""))
         insert_body = f"""
-    <{loc_uri}> a <http://purl.org/dc/terms/Location> ;
-        <http://www.w3.org/2000/01/rdf-schema#label> {label_literal} .
+    {sparql_escape_uri(loc_uri)} a dct:Location ;
+        rdfs:label {label_literal} .
 """
         _insert_triples(insert_body)
 
@@ -461,8 +459,8 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         loc_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
         label_literal = sparql_escape_string(entity.get("text", ""))
         insert_body = f"""
-    <{loc_uri}> a <http://purl.org/dc/terms/Location> ;
-        <http://www.w3.org/2000/01/rdf-schema#label> {label_literal} .
+    {sparql_escape_uri(loc_uri)} a dct:Location ;
+        rdfs:label {label_literal} .
 """
         _insert_triples(insert_body)
 
@@ -479,4 +477,3 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
 
     # For now, other labels fall back to no-op; they can be added here later.
     return created
-
