@@ -481,7 +481,7 @@ class TripletAnnotation(NERAnnotation):
         selector_part, selector_filter = self._build_selector_parts(part_of_id, uri)
         
         query_template = Template(
-            get_prefixes_for_query("ex", "oa", "mu", "prov", "foaf", "dct", "skolem", "nif", "rdf", "eli") +
+            get_prefixes_for_query("ex", "oa", "mu", "prov", "foaf", "dct", "skolem", "nif", "rdf", "eli", "eli-dl") +
             """
             INSERT {
               GRAPH <""" + GRAPHS["ai"] + """> {

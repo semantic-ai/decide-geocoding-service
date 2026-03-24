@@ -57,8 +57,8 @@ REGEX_PATTERNS = {
         r"\b([0-3]?\d)\.([0-1]?\d)\.(\d{4})\b",
         # 02-04-2025
         r"\b([0-3]?\d)-([0-1]?\d)-(\d{4})\b",
-        # 2. April 2025 / 02. April 2025
-        r"\b([0-3]?\d)\.\s*(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b",
+        # 2. April 2025 / 02. April 2025 / 2 April 2025
+        r"\b([0-3]?\d)\.?\s*(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b",
         # April 2025 (month-year)
         r"\b(Januar|Februar|März|Maerz|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s+(\d{4})\b"
     ]},
@@ -68,8 +68,8 @@ REGEX_PATTERNS = {
         r"\b([0-3]?\d)\.([0-1]?\d)\.(\d{4})\b",
         # 02-04-2025
         r"\b([0-3]?\d)-([0-1]?\d)-(\d{4})\b",
-        # 02 April 2025 / 2 April 2025
-        r"\b([0-3]?\d)\.\s*(Januari|Februari|Maart|April|Mei|Juni|Juli|Augustus|September|Oktober|November|December)\s+(\d{4})\b",
+        # 02 April 2025 / 2 April 2025 / 2 April 2025 (without dot)
+        r"\b([0-3]?\d)\.?\s*(Januari|Februari|Maart|April|Mei|Juni|Juli|Augustus|September|Oktober|November|December)\s+(\d{4})\b",
         # April 2025 (month-year)
         r"\b(Januari|Februari|Maart|April|Mei|Juni|Juli|Augustus|September|Oktober|November|December)\s+(\d{4})\b"
     ]},
@@ -79,8 +79,8 @@ REGEX_PATTERNS = {
         r"\b([0-3]?\d)\.([0-1]?\d)\.(\d{4})\b",
         # 02-04-2025
         r"\b([0-3]?\d)-([0-1]?\d)-(\d{4})\b",
-        # 02 April 2025 / 2 April 2025
-        r"\b([0-3]?\d)\.\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b",
+        # 02 April 2025 / 2 April 2025 / 2 April 2025 (without dot)
+        r"\b([0-3]?\d)\.?\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b",
         # April 2025 (month-year)
         r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b"
     ]}

@@ -44,7 +44,8 @@ SPARQL_PREFIXES = {
     "schema": "https://schema.org/",
     "epvoc": "https://data.europarl.europa.eu/def/epvoc#",
     "nie": "http://www.semanticdesktop.org/ontologies/2007/01/19/nie#",
-    "harvesting": "http://lblod.data.gift/vocabularies/harvesting/"
+    "harvesting": "http://lblod.data.gift/vocabularies/harvesting/",
+    "besluit": "http://data.vlaanderen.be/ns/besluit#",
 }
 
 # ==============================================================================
