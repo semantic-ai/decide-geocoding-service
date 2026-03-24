@@ -183,8 +183,7 @@ class OllamaTranslateService(BaseTranslator):
                 )
                 translated_chunks.append(self._translate_chunk(chunk, dest_lang, src_lang))
 
-            translated_text = "\n\n".join(part.strip() for part in translated_chunks if part.strip())
-            translated_text = re.sub(r"\n{3,}", "\n\n", translated_text).strip()
+            translated_text = " ".join(part.strip() for part in translated_chunks if part.strip())
 
         return TranslationResult(
             service="Ollama",
