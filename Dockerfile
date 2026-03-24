@@ -12,6 +12,3 @@ RUN uv pip install https://github.com/explosion/spacy-models/releases/download/e
 RUN uv pip install transformers==4.57.1
 
 ENV BASE_REGISTRY_URI=https://api.basisregisters.vlaanderen.be
-
-ADD ./decide_ai_service_base-0.1.0-py3-none-any.whl .
-RUN uv pip install ./decide_ai_service_base-0.1.0-py3-none-any.whl
