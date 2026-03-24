@@ -1,4 +1,3 @@
-import os
 import importlib
 import uuid
 import langdetect
@@ -12,7 +11,7 @@ from escape_helpers import sparql_escape_uri, sparql_escape_string
 
 from decide_ai_service_base.task import Task
 from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES, LANGUAGE_CODE_TO_URI, LANGUAGE_URI_TO_CODE
-from decide_ai_service_base.annotation import TripletAnnotation
+from decide_ai_service_base.annotation import RelationExtractionAnnotation
 
 from .ner_functions import extract_entities
 from .config import get_config
@@ -39,7 +38,7 @@ class EntityExtractionTask(Task):
             error_msg = f"Unsupported language code '{language}' - cannot create language annotation"
             self.logger.error(error_msg)
             raise ValueError(error_msg)
-        TripletAnnotation(
+        RelationExtractionAnnotation(
             subject=source_uri,
             predicate="eli:language",
             obj=sparql_escape_uri(lang_uri),
@@ -49,14 +48,14 @@ class EntityExtractionTask(Task):
             end=None,
             agent=AI_COMPONENTS["ner_extractor"],
             agent_type=AGENT_TYPES["ai_component"]
-        ).add_to_triplestore()
+        ).add_to_triplestore_if_not_exists()
 
     def create_title_relation(self, source_uri: str, entities: list[dict[str, Any]]):
         print(f"[TITLE] subject: {self.source}; source_uri: {source_uri}")
 
         for entity in entities:
             if entity['label'] == 'TITLE':
-                TripletAnnotation(
+                RelationExtractionAnnotation(
                     subject=source_uri,
                     predicate="eli:title",
                     obj=sparql_escape_string(entity['text']),
@@ -66,7 +65,7 @@ class EntityExtractionTask(Task):
                     end=entity['end'],
                     agent=AI_COMPONENTS["ner_extractor"],
                     agent_type=AGENT_TYPES["ai_component"]
-                ).add_to_triplestore()
+                ).add_to_triplestore_if_not_exists()
                 self.logger.info(
                     f"Created Title triplet suggestion for '{entity['text']}' ({entity['label']}) at [{entity['start']}:{entity['end']}]")
 
@@ -89,7 +88,7 @@ class EntityExtractionTask(Task):
             if not predicate:
                 continue
 
-            entity_uri = TripletAnnotation(
+            entity_uri = RelationExtractionAnnotation(
                 subject=source_uri,
                 predicate=predicate,
                 obj=sparql_escape_string(entity["text"]),
@@ -101,7 +100,7 @@ class EntityExtractionTask(Task):
                 agent_type=AGENT_TYPES["ai_component"],
                 confidence=entity.get("confidence", 1.0),                
                 entity_class=label
-            ).add_to_triplestore()
+            ).add_to_triplestore_if_not_exists()
             entity_uris.append(entity_uri)
 
         return entity_uris
@@ -161,7 +160,7 @@ class EntityExtractionTask(Task):
                   eli:realizes $work .
               }
               # And have English language annotation
-              GRAPH <""" + GRAPHS["ai"] + """> {
+              GRAPH $graph {
                 ?ann oa:hasBody ?stmt .
                 ?stmt a rdf:Statement ;
                   rdf:subject ?en_expr ;
@@ -176,7 +175,8 @@ class EntityExtractionTask(Task):
         query_result = query(
             query_template.substitute(
                 work=sparql_escape_uri(work_uri),
-                en_lang=sparql_escape_uri(en_lang_uri)
+                en_lang=sparql_escape_uri(en_lang_uri),
+                graph=sparql_escape_uri(GRAPHS["ai"])
             ),
             sudo=True
         )
@@ -259,7 +259,9 @@ class EntityExtractionTask(Task):
             }}            
             }}
             """
-        ).substitute(task=sparql_escape_uri(self.task_uri))
+        ).substitute(
+            task=sparql_escape_uri(self.task_uri)
+        )
 
         bindings = query(q, sudo=True).get("results", {}).get("bindings", [])
         if not bindings:
@@ -480,7 +482,7 @@ class TranslationTask(Task):
             error_msg = f"Unsupported language code '{language}' - cannot create language annotation"
             self.logger.error(error_msg)
             raise ValueError(error_msg)
-        TripletAnnotation(
+        RelationExtractionAnnotation(
             subject=source_uri,
             predicate="eli:language",
             obj=sparql_escape_uri(lang_uri),
@@ -490,7 +492,7 @@ class TranslationTask(Task):
             end=None,
             agent=AI_COMPONENTS["translator"],
             agent_type=AGENT_TYPES["ai_component"]
-        ).add_to_triplestore()
+        ).add_to_triplestore_if_not_exists()
 
     def create_translated_expression(
         self,
@@ -539,7 +541,7 @@ class TranslationTask(Task):
         # Also create an annotated statement that "translated expression realizes work",
         # targeting the original expression via oa:SpecificResource.
         if work_uri:
-            TripletAnnotation(
+            RelationExtractionAnnotation(
                 subject=translated_expr_uri,
                 predicate="eli:realizes",
                 obj=sparql_escape_uri(work_uri),
@@ -549,7 +551,7 @@ class TranslationTask(Task):
                 end=None,
                 agent=AI_COMPONENTS["translator"],
                 agent_type=AGENT_TYPES["ai_component"],
-            ).add_to_triplestore()
+            ).add_to_triplestore_if_not_exists()
 
         self.logger.info(
             f"Created translated expression {translated_expr_uri} in graph {target_graph_uri} (language: {target_language})")
@@ -887,7 +889,7 @@ class SegmentationTask(Task):
             # Convert to proper predicate format
 
             predicate = f"ex:{segment_label}"
-            segment_uri = TripletAnnotation(
+            segment_uri = RelationExtractionAnnotation(
                 subject=source_uri,
                 predicate=predicate,
                 obj=sparql_escape_string(segment_text),
@@ -898,7 +900,7 @@ class SegmentationTask(Task):
                 agent=AI_COMPONENTS["segmenter"],
                 agent_type=AGENT_TYPES["ai_component"],
                 confidence=1.0
-            ).add_to_triplestore()
+            ).add_to_triplestore_if_not_exists()
             segment_uris.append(segment_uri)
 
             self.logger.info(
