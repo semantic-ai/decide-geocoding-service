@@ -1,10 +1,11 @@
 import logging
 
 from src.airo import register_airo
-from src.task import Task, TranslationTask, SegmentationTask, EntityExtractionTask
+from src.task import TranslationTask, SegmentationTask, EntityExtractionTask
 from src.translation_plugin_etranslation import _callback_storage, _callback_lock
 from decide_ai_service_base.util import fail_busy_and_scheduled_tasks, process_open_tasks, wait_for_triplestore
 from decide_ai_service_base.schema import NotificationResponse, TaskOperationsResponse
+from decide_ai_service_base.task import Task
 
 from fastapi import APIRouter, BackgroundTasks, Request
 
