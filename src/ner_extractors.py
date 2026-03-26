@@ -8,76 +8,15 @@ Classes:
 - BaseExtractor: Base class for factory pattern extractors (returns dicts)
 - SpacyExtractor, FlairExtractor, etc.: Factory pattern implementations
 """
-import os
 import re
 import json
 import logging
-import spacy
 from flair.data import Sentence
 from typing import List, Dict, Any
 from .ner_models import model_manager
 from .ner_config import REGEX_PATTERNS, TITLE_EXTRACTION_INSTRUCTION, NER_MODELS, LABEL_MAPPINGS
 from .config import get_config
 import torch
-
-
-# ============================================================================
-# SPECIALIZED ANALYZER (Returns spaCy Doc for geocoding workflow)
-# ============================================================================
-
-class SpacyGeoAnalyzer:
-    """
-    Specialized analyzer for Belgian location extraction.
-    
-    NOTE: This is NOT part of the factory pattern (BaseExtractor).
-    It returns raw spaCy Doc objects for compatibility with the geocoding
-    workflow (process_text, form_addresses, form_locations).
-    
-    Use this for: Belgian location extraction with geocoding
-    Use SpacyExtractor for: General-purpose NER with dict outputs
-    """
-    
-    def __init__(self, model_path, labels=None):
-        self.model_path = model_path
-        self.labels = set(labels) if labels else None
-        self.nlp = None
-        self.logger = logging.getLogger(__name__)
-        self.load_model()
-
-    def load_model(self):
-        """Load the spaCy NER model from the specified path."""
-        if not os.path.exists(self.model_path):
-            self.logger.error(f"Model not found at {self.model_path}")
-            return
-        try:
-            self.nlp = spacy.load(self.model_path)
-            self.logger.info(
-                f"Loaded model: {self.nlp.meta.get('name', 'Unknown')} (v{self.nlp.meta.get('version', 'Unknown')})")
-            if self.nlp.has_pipe("ner"):
-                model_labels = self.nlp.get_pipe("ner").labels
-                self.logger.info(f"Model labels: {model_labels}")
-                if self.labels:
-                    self.logger.info(
-                        f"Filtering for labels: {sorted(self.labels)}")
-        except Exception as e:
-            self.logger.error(f"Error loading model: {e}")
-            self.nlp = None
-
-    def extract_entities(self, text):
-        """
-        Extract named entities from text and return spaCy Doc object.
-        
-        Returns spaCy Doc for compatibility with form_addresses() and form_locations()
-        in helper_functions.py which expect entity.label_ and entity.text attributes.
-        """
-        if not self.nlp:
-            return {"error": "Model not loaded"}
-        if not text.strip():
-            return {"entities": [], "text": text}
-        try:
-            return self.nlp(text)
-        except Exception as e:
-            return {"error": f"Processing error: {e}", "text": text}
 
 
 # ============================================================================
