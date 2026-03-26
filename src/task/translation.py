@@ -50,12 +50,12 @@ class TranslationTask(DecisionTask):
 
                 module_name, class_name, is_external = registry.get(
                     provider, registry.get("etranslation", registry["huggingface"]))
-                base_package = __package__ or "src"
-                module_path = module_name if is_external else f"{base_package}.{module_name}"
-
-                self.logger.info(
-                    f"Loading translation module: {module_path}, class: {class_name}, provider: {provider}")
-                module = importlib.import_module(module_path)
+                module_path = module_name if is_external else f"..{module_name}"
+                self.logger.info(f"Loading translation module: {module_path}, class: {class_name}, provider: {provider}")
+                if is_external:
+                    module = importlib.import_module(module_path)
+                else:
+                    module = importlib.import_module(module_path, package=__package__)
                 service_cls = getattr(module, class_name)
                 service = service_cls()
                 self._translator = Translator(services_list=[service])
