@@ -79,8 +79,10 @@ REGEX_PATTERNS = {
         r"\b([0-3]?\d)\.([0-1]?\d)\.(\d{4})\b",
         # 02-04-2025
         r"\b([0-3]?\d)-([0-1]?\d)-(\d{4})\b",
-        # 02 April 2025 / 2 April 2025 / 2 April 2025 (without dot)
+        # 02 April 2025 / 2 April 2025 (DD Month YYYY)
         r"\b([0-3]?\d)\.?\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b",
+        # June 25, 2021 / June 25th, 2021 / September 1st, 2021 (Month DD[ordinal], YYYY)
+        r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+([0-3]?\d)(?:st|nd|rd|th)?,\s*(\d{4})\b",
         # April 2025 (month-year)
         r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b"
     ]}
