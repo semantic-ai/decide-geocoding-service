@@ -6,13 +6,8 @@ from typing import Any, Dict, List, Optional
 from helpers import update, query
 from escape_helpers import sparql_escape_uri, sparql_escape_string, sparql_escape_date
 
-from .sparql_config import (
-    get_prefixes_for_query,
-    GRAPHS,
-    AI_COMPONENTS,
-    AGENT_TYPES,
-)
-from .annotation import TripletAnnotation
+from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, AI_COMPONENTS, AGENT_TYPES
+from decide_ai_service_base.annotation import RelationExtractionAnnotation
 
 
 def _parse_date_literal(text: str) -> str:
@@ -114,7 +109,7 @@ def _insert_triples(insert_body: str) -> None:
 
 def _annotate(task,subject: str, predicate: str, obj: str, source_uri: str, entity: Dict[str, Any]) -> str:
     """Create a TripletAnnotation and return its URI."""
-    return TripletAnnotation(
+    return RelationExtractionAnnotation(
         subject=subject,
         predicate=predicate,
         obj=obj,
@@ -125,7 +120,7 @@ def _annotate(task,subject: str, predicate: str, obj: str, source_uri: str, enti
         agent=AI_COMPONENTS["ner_extractor"],
         agent_type=AGENT_TYPES["ai_component"],
         confidence=entity.get("confidence", 1.0),
-    ).add_to_triplestore()
+    ).add_to_triplestore_if_not_exists()
 
 
 def _create_work_date_annotation(task, work_uri: Optional[str], source_uri: str, entity: Dict[str, Any], predicate_uri: str) -> List[str]:
@@ -257,9 +252,9 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         begin_literal = _parse_date_literal(entity.get("text", ""))
         end_literal = begin_literal  # minimal: same date for start/end
         insert_body = f"""
-    {sparql_escape_uri(period_uri)} a <http://www.w3.org/2006/time#ProperInterval> ;
-        <http://www.w3.org/2006/time#hasBeginning> {begin_literal} ;
-        <http://www.w3.org/2006/time#hasEnd> {end_literal} .
+    {sparql_escape_uri(period_uri)} a {sparql_escape_uri("http://www.w3.org/2006/time#ProperInterval")} ;
+        {sparql_escape_uri("http://www.w3.org/2006/time#hasBeginning")} {begin_literal} ;
+        {sparql_escape_uri("http://www.w3.org/2006/time#hasEnd")} {end_literal} .
 """
         _insert_triples(insert_body)
 
@@ -286,12 +281,12 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         begin_literal = _parse_date_literal(entity.get("text", ""))
         end_literal = begin_literal
         insert_body = f"""
-    {sparql_escape_uri(period_uri)} a <http://www.w3.org/2006/time#ProperInterval> ;
-        <http://www.w3.org/2006/time#hasBeginning> {begin_literal} ;
-        <http://www.w3.org/2006/time#hasEnd> {end_literal} ;
+    {sparql_escape_uri(period_uri)} a {sparql_escape_uri("http://www.w3.org/2006/time#ProperInterval")} ;
+        {sparql_escape_uri("http://www.w3.org/2006/time#hasBeginning")} {begin_literal} ;
+        {sparql_escape_uri("http://www.w3.org/2006/time#hasEnd")} {end_literal} ;
         mu:uuid {sparql_escape_string(period_id)} .
 
-    {sparql_escape_uri(nb_uri)} a <https://data.vlaanderen.be/ns/omgevingsvergunning#NormatieveBepaling> ;
+    {sparql_escape_uri(nb_uri)} a {sparql_escape_uri("https://data.vlaanderen.be/ns/omgevingsvergunning#NormatieveBepaling")} ;
         mu:uuid {sparql_escape_string(nb_id)} ;
         dct:extent {sparql_escape_uri(period_uri)} .
 """
@@ -417,7 +412,7 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         org_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
         label_literal = sparql_escape_string(entity.get("text", ""))
         insert_body = f"""
-    {sparql_escape_uri(org_uri)} a <http://www.w3.org/ns/org#Organization> ;
+    {sparql_escape_uri(org_uri)} a {sparql_escape_uri("http://www.w3.org/ns/org#Organization")} ;
         rdfs:label {label_literal} .
 """
         _insert_triples(insert_body)

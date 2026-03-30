@@ -23,5 +23,4 @@ pydantic>=2.0.0
 SPARQLWrapper
 translatepy
 span-aligner>=0.2.4
-#tokenizers==0.22.1
-#scikit-learn
+https://github.com/semantic-ai/decide-ai-service-base/releases/download/0.1.1/decide_ai_service_base-0.1.1-py3-none-any.whl
