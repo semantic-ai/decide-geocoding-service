@@ -10,14 +10,6 @@
     "labels": ["CITY", "DOMAIN", "HOUSENUMBERS", "INTERSECTION", "POSTCODE", "PROVINCE", "ROAD", "STREET"],
     "enable_refinement": true
   },
-  "geocoding": {
-    "nominatim_base_url": "http://nominatim:8080"
-  },
-  "llm": {
-    "model_name": "gpt-4o-mini",
-    "temperature": 0.1,
-    "api_key": null
-  },
   "translation": {
     "target_language": "en",
     "provider": "ollama",
@@ -39,14 +31,6 @@
       "temperature": 0.1,
       "max_text_length": 6000
     }
-  },
-  "ml_training": {
-    "transformer": "distilbert/distilbert-base-uncased",
-    "learning_rate": 2e-5,
-    "epochs": 2,
-    "weight_decay": 0.01,
-    "huggingface_token": null,
-    "huggingface_output_model_id": null
   },
   "segmentation": {
     "model_name": "gpt-4.1",
