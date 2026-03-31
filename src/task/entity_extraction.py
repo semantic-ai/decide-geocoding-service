@@ -60,8 +60,6 @@ class EntityExtractionTask(DecisionTask):
         Returns:
             list[str]: List of URIs of the created annotation resources for applicable entities.
         """
-        print(f"[GENERAL ENTITIES] subject: {self.source}; source_uri: {source_uri}")
-
         created_annotation_uris: list[str] = []
 
         # Resolve the work URI for this expression once (may be None if unknown)
@@ -318,7 +316,6 @@ class EntityExtractionTask(DecisionTask):
             
             # Clean up entities by formatting the dates, periods and splitting the locations into individual entities.
             general_entities_formatted = entity_formatter.format(general_entities)
-            print(f"[FORMATTED ENTITIES] {general_entities_formatted}")
 
             entity_uris = self.create_general_entity_annotations(
                 target_expression_uri, general_entities_formatted)

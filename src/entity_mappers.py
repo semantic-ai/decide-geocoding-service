@@ -214,8 +214,6 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         missing (e.g. no work URI).
     """
 
-    print(f"[map_entity_to_annotations] Mapping entity: {entity} for expression {expression_uri} and work {work_uri}")
-
     label = str(entity.get("label", "")).upper()
 
     created: List[str] = []
