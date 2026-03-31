@@ -135,7 +135,7 @@ class TranslationConfig(BaseModel):
         default="en",
         description="Default target language for translations"
     )
-    provider: Literal["huggingface", "etranslation", "gemma", "ollama", "auto", "google", "microsoft", "deepl", "libre"] = Field(
+    provider: Literal["huggingface", "etranslation", "ollama", "auto", "google", "microsoft", "deepl", "libre"] = Field(
         default="huggingface",
         description="Translation provider to use"
     )

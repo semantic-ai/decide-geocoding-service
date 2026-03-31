@@ -45,7 +45,6 @@ class TranslationTask(DecisionTask):
                     "libre": ("translatepy.translators.libre", "LibreTranslate", True),
                     "huggingface": ("translation_plugin_huggingface", "HuggingFaceTranslateService", False),
                     "etranslation": ("translation_plugin_etranslation", "ETRanslationService", False),
-                    "gemma": ("translation_plugin_gemma", "GemmaTranslateService", False),
                     "ollama": ("translation_plugin_ollama", "OllamaTranslateService", False),
                 }
 
