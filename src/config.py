@@ -18,7 +18,7 @@ class NerConfig(BaseModel):
         default="nl",
         description="Default language for NER extraction"
     )
-    method: Literal["composite", "spacy", "huggingface", "flair", "regex", "title"] = Field(
+    method: Literal["composite", "spacy", "huggingface", "flair", "regex"] = Field(
         default="composite",
         description="Default NER extraction method"
     )

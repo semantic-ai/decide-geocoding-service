@@ -10,8 +10,6 @@ Location extraction uses the RobBERT NER model (Ghent-focused). Entity extractio
   - Model: [svercoutere/RoBERTa-NER-BE-Loc](https://huggingface.co/svercoutere/RoBERTa-NER-BE-Loc)
 - **Legal entities**: DATE, LOCATION, LEGAL_GROUND, ADMINISTRATIVE_BODY, MANDATARY (HuggingFace, default composite method)
   - Model: [PedroDKE/multilingual-ner-abb](https://huggingface.co/PedroDKE/multilingual-ner-abb)
-- **Document fields**: TITLE (LLM-based extraction)
-  - Model: [javdrher/decide-gemma3-270m](https://huggingface.co/javdrher/decide-gemma3-270m)
 - **Refined types**: Dates (publication_date, session_date, legal_date, etc.) and locations (impact_location, context_location)
   - Model: [svercoutere/longformer-classifier-refinement-abb](https://huggingface.co/svercoutere/longformer-classifier-refinement-abb)
 - **Translation**: HuggingFace, eTranslation (EU)
