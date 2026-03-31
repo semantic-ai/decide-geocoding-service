@@ -123,9 +123,28 @@ def _annotate(task,subject: str, predicate: str, obj: str, source_uri: str, enti
     ).add_to_triplestore_if_not_exists()
 
 
+def _get_date_literal(entity: Dict[str, Any]) -> str:
+    """Get a SPARQL date literal from an entity, preferring formatted_text over raw text parsing."""
+    formatted_text = entity.get("formatted_text")
+    if formatted_text:
+        return formatted_text
+    return _parse_date_literal(entity.get("text", ""))
+
+def _get_period_literals(entity: Dict[str, Any]) -> tuple[str, str]:
+    """Extract start and end date literals from a period entity."""
+    formatted_start = entity.get("formatted_start")
+    formatted_end = entity.get("formatted_end")
+    if formatted_start and formatted_end:
+        return formatted_start, formatted_end
+    
+    # Fallback to parsing raw text if formatted values are not available.
+    falback = _parse_date_literal(entity.get("text", ""))
+    return falback, falback
+
+
 def _create_work_date_annotation(task, work_uri: Optional[str], source_uri: str, entity: Dict[str, Any], predicate_uri: str) -> List[str]:
     """Helper to create a single date statement on the work."""
-    obj_literal = _parse_date_literal(entity.get("text", ""))
+    obj_literal = _get_date_literal(entity)
     ann_uri = _annotate(
         task,
         subject=work_uri,
@@ -175,7 +194,7 @@ def _get_or_create_session_for_work(task, work_uri: Optional[str]) -> Optional[s
 
 def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str, entity: Dict[str, Any]) -> List[str]:
     """Map a refined entity into one or more RDF annotations.
-
+    for
     This is the main entry point used by EntityExtractionTask. It examines
     the entity's refined label and emits the appropriate Open Annotation +
     rdf:Statement structure in the AI/public graph.
@@ -194,6 +213,9 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         It may be empty when the label is not handled or required context is
         missing (e.g. no work URI).
     """
+
+    print(f"[map_entity_to_annotations] Mapping entity: {entity} for expression {expression_uri} and work {work_uri}")
+
     label = str(entity.get("label", "")).upper()
 
     created: List[str] = []
@@ -249,8 +271,8 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
     if label == "CONTEXT_PERIOD":
         period_id = str(uuid.uuid4())
         period_uri = f"https://data.lblod.info/id/period/{period_id}"
-        begin_literal = _parse_date_literal(entity.get("text", ""))
-        end_literal = begin_literal  # minimal: same date for start/end
+        begin_literal, end_literal = _get_period_literals(entity)
+
         insert_body = f"""
     {sparql_escape_uri(period_uri)} a {sparql_escape_uri("http://www.w3.org/2006/time#ProperInterval")} ;
         {sparql_escape_uri("http://www.w3.org/2006/time#hasBeginning")} {begin_literal} ;
@@ -278,8 +300,8 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         nb_id = str(uuid.uuid4())
         period_uri = f"https://data.lblod.info/id/period/{period_id}"
         nb_uri = f"https://data.lblod.info/id/normatievebepaling/{nb_id}"
-        begin_literal = _parse_date_literal(entity.get("text", ""))
-        end_literal = begin_literal
+        begin_literal, end_literal = _get_period_literals(entity)
+        
         insert_body = f"""
     {sparql_escape_uri(period_uri)} a {sparql_escape_uri("http://www.w3.org/2006/time#ProperInterval")} ;
         {sparql_escape_uri("http://www.w3.org/2006/time#hasBeginning")} {begin_literal} ;
@@ -325,7 +347,7 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         if not session_uri:
             return created
 
-        date_literal = _parse_date_literal(entity.get("text", ""))
+        date_literal = _get_date_literal(entity)
         # Activity date
         ann1 = _annotate(
             task,
@@ -431,7 +453,7 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
     # Context location: general spatial context for the work.
     if label == "CONTEXT_LOCATION":
         loc_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
-        label_literal = sparql_escape_string(entity.get("text", ""))
+        label_literal = sparql_escape_string(entity.get("formatted_text") or entity.get("text", ""))
         insert_body = f"""
     {sparql_escape_uri(loc_uri)} a dct:Location ;
         rdfs:label {label_literal} .
@@ -452,7 +474,7 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
     # Impact location: where the decision has effect.
     if label == "IMPACT_LOCATION":
         loc_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
-        label_literal = sparql_escape_string(entity.get("text", ""))
+        label_literal = sparql_escape_string(entity.get("formatted_text") or entity.get("text", ""))
         insert_body = f"""
     {sparql_escape_uri(loc_uri)} a dct:Location ;
         rdfs:label {label_literal} .
