@@ -9,12 +9,11 @@ Classes:
 - SpacyExtractor, FlairExtractor, etc.: Factory pattern implementations
 """
 import re
-import json
 import logging
 from flair.data import Sentence
 from typing import List, Dict, Any
 from .ner_models import model_manager
-from .ner_config import REGEX_PATTERNS, TITLE_EXTRACTION_INSTRUCTION, NER_MODELS, LABEL_MAPPINGS
+from .ner_config import REGEX_PATTERNS, NER_MODELS, LABEL_MAPPINGS
 from .config import get_config
 import torch
 
@@ -236,86 +235,6 @@ class FlairExtractor(BaseExtractor):
         except Exception as e:
             model_info = self.model_name or f"config({self.language})"
             logging.warning(f"Error in Flair extraction ({model_info}): {e}")
-            return []
-
-
-class TitleExtractor(BaseExtractor):
-    """Extract document title using Hugging Face Gemma model."""
-    
-    def __init__(self, language: str = 'nl'):
-        super().__init__(language, extractor_type='title')
-    
-    def extract(self, text: str) -> List[Dict[str, Any]]:
-        """
-        Extract title from text using Gemma model.
-        
-        Returns a single entity with label 'TITLE'.
-        """
-        try:
-            # Load the title extraction pipeline
-            generator = model_manager.get_title_extraction_model()
-            
-            # Prepare the prompt combining instruction and text
-            prompt = f"{TITLE_EXTRACTION_INSTRUCTION}\n\nText:\n{text}"
-            
-            # Create conversation format matching HuggingFace example
-            conversation = [{"role": "user", "content": prompt}]
-            
-            # Generate the title (matching HF example format)
-            max_tokens = NER_MODELS['title_extraction']['max_new_tokens']
-            output = generator(
-                conversation, 
-                max_new_tokens=max_tokens, 
-                return_full_text=False
-            )[0]
-            
-            # Parse the generated text to extract JSON
-            generated_text = output['generated_text']
-            
-            # Try to extract JSON from the response
-            try:
-                # Look for JSON in the response
-                if '{' in generated_text and '}' in generated_text:
-                    start_idx = generated_text.find('{')
-                    end_idx = generated_text.rfind('}') + 1
-                    json_str = generated_text[start_idx:end_idx]
-                    result = json.loads(json_str)
-                    title = result.get('title', '').strip()
-                else:
-                    # Fallback: treat whole response as title
-                    title = generated_text.strip()
-            except json.JSONDecodeError:
-                # If JSON parsing fails, use the whole response
-                title = generated_text.strip()
-            
-            if title:
-                # Try to find the title in the original text
-                start_pos = text.find(title)
-                if start_pos != -1:
-                    # Title found in original text
-                    entities = [{
-                        'text': title,
-                        'label': 'TITLE',
-                        'start': start_pos,
-                        'end': start_pos + len(title),
-                        'confidence': 1.0  # LLM doesn't provide confidence, default to 1.0
-                    }]
-                else:
-                    # Title generated/extracted but not exact match in text
-                    # Set start=0, end=0 to indicate it's a generated/inferred title
-                    entities = [{
-                        'text': title,
-                        'label': 'TITLE',
-                        'start': 0,
-                        'end': 0,
-                        'confidence': 0.8  # Lower confidence for generated titles
-                    }]
-                return entities
-            
-            return []
-            
-        except Exception as e:
-            logging.warning(f"Error in title extraction: {e}")
             return []
 
 

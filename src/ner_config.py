@@ -22,10 +22,6 @@ NER_MODELS = {
         'en': 'PedroDKE/multilingual-ner-abb',
         'aggregation_strategy': 'simple'
     },
-    'title_extraction': {
-        'model': 'javdrher/decide-gemma3-270m',
-        'max_new_tokens': 4000
-    },
     'refinement': {
         'model': 'svercoutere/longformer-classifier-refinement-abb',
         'max_length': 2048,
@@ -79,24 +75,15 @@ REGEX_PATTERNS = {
         r"\b([0-3]?\d)\.([0-1]?\d)\.(\d{4})\b",
         # 02-04-2025
         r"\b([0-3]?\d)-([0-1]?\d)-(\d{4})\b",
-        # 02 April 2025 / 2 April 2025 / 2 April 2025 (without dot)
+        # 02 April 2025 / 2 April 2025 (DD Month YYYY)
         r"\b([0-3]?\d)\.?\s*(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b",
+        # June 25, 2021 / June 25th, 2021 / September 1st, 2021 (Month DD[ordinal], YYYY)
+        r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+([0-3]?\d)(?:st|nd|rd|th)?,\s*(\d{4})\b",
         # April 2025 (month-year)
         r"\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b"
     ]}
 }
 
-# Title extraction instruction for Gemma model
-# Works for both Dutch and German legal documents
-TITLE_EXTRACTION_INSTRUCTION = """
-    Your task is to generate responses in JSON format.
-    Ensure that your output strictly follows the provided JSON structure.
-    Each key in the JSON should be correctly populated according to the instructions given.
-    Pay attention to details and ensure the JSON is well-formed and valid.
-    Only use phrases present in the given text.
-    Extract the title from the following text and return it in JSON format with the key \"title\".
-    The title should be the main heading or subject of the document.
-"""
 
 LABEL_MAPPINGS = {
     'spacy': {

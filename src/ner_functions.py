@@ -18,7 +18,6 @@ from .ner_extractors import (
     HuggingFaceExtractor,
     FlairExtractor,
     LanguageRegexExtractor,
-    TitleExtractor,
     CompositeExtractor,
     EntityRefiner
 )
@@ -45,7 +44,7 @@ def get_extractor(language: str, extractor_type: str = 'composite'):
     
     Args:
         language: Language code ('de', 'nl', 'en')
-        extractor_type: Type of extractor ('composite', 'spacy', 'huggingface', 'flair', 'regex', 'title')
+        extractor_type: Type of extractor ('composite', 'spacy', 'huggingface', 'flair', 'regex')
         
     Returns:
         Configured extractor instance
@@ -55,7 +54,6 @@ def get_extractor(language: str, extractor_type: str = 'composite'):
         'huggingface': HuggingFaceExtractor,
         'flair': FlairExtractor,
         'regex': LanguageRegexExtractor,
-        'title': TitleExtractor,
         'composite': get_composite_extractor
     }
 

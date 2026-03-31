@@ -18,7 +18,7 @@ class NerConfig(BaseModel):
         default="nl",
         description="Default language for NER extraction"
     )
-    method: Literal["composite", "spacy", "huggingface", "flair", "regex", "title"] = Field(
+    method: Literal["composite", "spacy", "huggingface", "flair", "regex"] = Field(
         default="composite",
         description="Default NER extraction method"
     )
@@ -99,6 +99,35 @@ class ETranslationConfig(BaseModel):
     )
 
 
+class OllamaTranslationConfig(BaseModel):
+    """Ollama translation service configuration."""
+
+    base_url: AnyHttpUrl = Field(
+        default="http://ollama:11434",
+        description="Base URL for the Ollama API"
+    )
+    model: str = Field(
+        default="mistral-nemo",
+        description="Ollama model name to use for translation"
+    )
+    timeout_seconds: float = Field(
+        default=180.0,
+        ge=1.0,
+        description="HTTP request timeout in seconds"
+    )
+    temperature: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=2.0,
+        description="Generation temperature"
+    )
+    max_text_length: int = Field(
+        default=6000,
+        ge=200,
+        description="Maximum characters per translation chunk sent to Ollama"
+    )
+
+
 class TranslationConfig(BaseModel):
     """Translation service configuration."""
     
@@ -106,13 +135,17 @@ class TranslationConfig(BaseModel):
         default="en",
         description="Default target language for translations"
     )
-    provider: Literal["huggingface", "etranslation", "gemma", "auto", "google", "microsoft", "deepl", "libre"] = Field(
+    provider: Literal["huggingface", "etranslation", "ollama", "auto", "google", "microsoft", "deepl", "libre"] = Field(
         default="huggingface",
         description="Translation provider to use"
     )
     etranslation: ETranslationConfig = Field(
         default_factory=ETranslationConfig,
         description="eTranslation-specific settings"
+    )
+    ollama: OllamaTranslationConfig = Field(
+        default_factory=OllamaTranslationConfig,
+        description="Ollama-specific settings"
     )
     
     @field_validator('provider', mode='before')
