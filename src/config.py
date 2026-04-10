@@ -128,6 +128,42 @@ class OllamaTranslationConfig(BaseModel):
     )
 
 
+class LangChainTranslationConfig(BaseModel):
+    """LangChain-backed translation configuration (provider-agnostic)."""
+
+    provider: str = Field(
+        default="ollama",
+        description="LangChain provider name, e.g. 'ollama', 'openai', 'mistral', 'azure_openai'"
+    )
+    model_name: str = Field(
+        default="mistral-nemo",
+        description="Model name as understood by the provider"
+    )
+    api_key: SecretStr | None = Field(
+        default=None,
+        description="API key for the provider"
+    )
+    base_url: str | None = Field(
+        default=None,
+        description="Custom base URL (required for Ollama and self-hosted endpoints)"
+    )
+    temperature: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=2.0,
+        description="Generation temperature"
+    )
+    timeout: int | None = Field(
+        default=180,
+        description="Request timeout in seconds"
+    )
+    max_text_length: int = Field(
+        default=6000,
+        ge=200,
+        description="Maximum characters per translation chunk"
+    )
+
+
 class TranslationConfig(BaseModel):
     """Translation service configuration."""
     
@@ -135,7 +171,7 @@ class TranslationConfig(BaseModel):
         default="en",
         description="Default target language for translations"
     )
-    provider: Literal["huggingface", "etranslation", "ollama", "auto", "google", "microsoft", "deepl", "libre"] = Field(
+    provider: Literal["huggingface", "etranslation", "ollama", "langchain", "auto", "google", "microsoft", "deepl", "libre"] = Field(
         default="huggingface",
         description="Translation provider to use"
     )
@@ -147,7 +183,11 @@ class TranslationConfig(BaseModel):
         default_factory=OllamaTranslationConfig,
         description="Ollama-specific settings"
     )
-    
+    langchain: LangChainTranslationConfig = Field(
+        default_factory=LangChainTranslationConfig,
+        description="LangChain provider-agnostic translation settings"
+    )
+
     @field_validator('provider', mode='before')
     @classmethod
     def normalize_provider(cls, v: str) -> str:

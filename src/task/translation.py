@@ -46,6 +46,7 @@ class TranslationTask(DecisionTask):
                     "huggingface": ("translation_plugin_huggingface", "HuggingFaceTranslateService", False),
                     "etranslation": ("translation_plugin_etranslation", "ETRanslationService", False),
                     "ollama": ("translation_plugin_ollama", "OllamaTranslateService", False),
+                    "langchain": ("translation_plugin_langchain", "LangChainTranslateService", False),
                 }
 
                 module_name, class_name, is_external = registry.get(
