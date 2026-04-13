@@ -59,8 +59,6 @@ class LangChainTranslateService(BaseTranslator):
             model_kwargs["api_key"] = self.config.api_key.get_secret_value()
         if self.config.base_url:
             model_kwargs["base_url"] = self.config.base_url
-        if self.config.timeout:
-            model_kwargs["timeout"] = self.config.timeout
 
         self._chat_model = init_chat_model(
             f"{self.config.provider}:{self.config.model_name}",
@@ -72,10 +70,6 @@ class LangChainTranslateService(BaseTranslator):
             self.config.provider,
             self.config.model_name,
         )
-
-    # ------------------------------------------------------------------
-    # Language helpers (identical to translation_plugin_ollama.py)
-    # ------------------------------------------------------------------
 
     def _get_lang_code(self, language) -> str:
         if isinstance(language, Language):
@@ -95,10 +89,6 @@ class LangChainTranslateService(BaseTranslator):
         if isinstance(language, Language):
             return language.alpha2 if hasattr(language, "alpha2") else str(language)
         return str(language)
-
-    # ------------------------------------------------------------------
-    # Text chunking (identical to translation_plugin_ollama.py)
-    # ------------------------------------------------------------------
 
     def _split_text_safely(self, text: str, max_chars: int) -> list[str]:
         """Split text into chunks that respect sentence boundaries."""
@@ -129,10 +119,6 @@ class LangChainTranslateService(BaseTranslator):
             chunks.append(cur)
 
         return chunks
-
-    # ------------------------------------------------------------------
-    # Translation
-    # ------------------------------------------------------------------
 
     def _build_user_message(self, text: str, source_language: str, destination_language: str) -> str:
         src_name = LANGUAGE_NAMES.get(source_language.lower(), source_language.upper())
