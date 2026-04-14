@@ -122,22 +122,23 @@ class SegmentationTask(DecisionTask):
         """Create a Segmentor configured from app config."""
         from ..library.segmentors import GemmaSegmentor, LLMSegmentor
         seg_config = get_config().segmentation
-        api_key = seg_config.api_key.get_secret_value() if seg_config.api_key else None
+        api_key = seg_config.llm.api_key.get_secret_value() if seg_config.llm.api_key else None
 
-        if seg_config.model_name == "wdmuer/decide-marked-segmentation":
+        if seg_config.llm.model_name == "wdmuer/decide-marked-segmentation":
             return GemmaSegmentor(
                 api_key=api_key,
-                endpoint=seg_config.endpoint,
-                model_name=seg_config.model_name,
-                temperature=seg_config.temperature,
+                base_url=seg_config.llm.base_url,
+                model_name=seg_config.llm.model_name,
+                temperature=seg_config.llm.temperature,
                 max_new_tokens=seg_config.max_new_tokens,
             )
         else:
             return LLMSegmentor(
+                provider=seg_config.llm.provider,
+                model_name=seg_config.llm.model_name,
                 api_key=api_key,
-                endpoint=seg_config.endpoint,
-                model_name=seg_config.model_name,
-                temperature=seg_config.temperature,
+                base_url=seg_config.llm.base_url,
+                temperature=seg_config.llm.temperature,
                 max_new_tokens=seg_config.max_new_tokens,
             )
 
