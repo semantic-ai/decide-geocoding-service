@@ -74,7 +74,7 @@ Used by the `translating` task.
 | Key | Values / Default | Effect |
 |---|---|---|
 | `target_language` | `en`, `nl`, `de`, `fr`, `es` | Language to translate into |
-| `provider` | `huggingface` *(default)*, `etranslation`, `ollama`, `google`, `microsoft`, `deepl`, `libre`, `auto` | Which translation backend to use. `huggingface` runs locally (Helsinki-NLP OPUS-MT, no credentials needed). `etranslation` uses the EU Commission API (requires credentials). `auto` tries providers in order until one succeeds |
+| `provider` | `huggingface` *(default)*, `etranslation`, `langchain` | Which translation backend to use. `huggingface` runs locally (Helsinki-NLP OPUS-MT, no credentials needed). `etranslation` uses the EU Commission API (requires credentials). `langchain` delegates to a configurable LLM backend (e.g. Ollama, OpenAI, Mistral) |
 
 **`etranslation` sub-keys** (only relevant when `provider` is `etranslation`):
 
