@@ -99,21 +99,25 @@ class ETranslationConfig(BaseModel):
     )
 
 
-class OllamaTranslationConfig(BaseModel):
-    """Ollama translation service configuration."""
 
-    base_url: AnyHttpUrl = Field(
-        default="http://ollama:11434",
-        description="Base URL for the Ollama API"
+class LangChainTranslationConfig(BaseModel):
+    """LangChain-backed translation configuration (provider-agnostic)."""
+
+    provider: str = Field(
+        default="ollama",
+        description="LangChain provider name, e.g. 'ollama', 'openai', 'mistral', 'azure_openai'"
     )
-    model: str = Field(
+    model_name: str = Field(
         default="mistral-nemo",
-        description="Ollama model name to use for translation"
+        description="Model name as understood by the provider"
     )
-    timeout_seconds: float = Field(
-        default=180.0,
-        ge=1.0,
-        description="HTTP request timeout in seconds"
+    api_key: SecretStr | None = Field(
+        default=None,
+        description="API key for the provider"
+    )
+    base_url: str | None = Field(
+        default=None,
+        description="Custom base URL (required for Ollama and self-hosted endpoints)"
     )
     temperature: float = Field(
         default=0.1,
@@ -121,10 +125,14 @@ class OllamaTranslationConfig(BaseModel):
         le=2.0,
         description="Generation temperature"
     )
+    timeout: int | None = Field(
+        default=180,
+        description="Request timeout in seconds"
+    )
     max_text_length: int = Field(
         default=6000,
         ge=200,
-        description="Maximum characters per translation chunk sent to Ollama"
+        description="Maximum characters per translation chunk"
     )
 
 
@@ -135,19 +143,19 @@ class TranslationConfig(BaseModel):
         default="en",
         description="Default target language for translations"
     )
-    provider: Literal["huggingface", "etranslation", "ollama", "auto", "google", "microsoft", "deepl", "libre"] = Field(
-        default="huggingface",
+    provider: Literal["huggingface", "etranslation", "langchain"] = Field(
+        default="langchain",
         description="Translation provider to use"
     )
     etranslation: ETranslationConfig = Field(
         default_factory=ETranslationConfig,
         description="eTranslation-specific settings"
     )
-    ollama: OllamaTranslationConfig = Field(
-        default_factory=OllamaTranslationConfig,
-        description="Ollama-specific settings"
+    langchain: LangChainTranslationConfig = Field(
+        default_factory=LangChainTranslationConfig,
+        description="LangChain provider-agnostic translation settings"
     )
-    
+
     @field_validator('provider', mode='before')
     @classmethod
     def normalize_provider(cls, v: str) -> str:
