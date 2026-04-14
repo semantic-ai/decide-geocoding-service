@@ -12,7 +12,7 @@ Location extraction uses the RobBERT NER model (Ghent-focused). Entity extractio
   - Model: [PedroDKE/multilingual-ner-abb](https://huggingface.co/PedroDKE/multilingual-ner-abb)
 - **Refined types**: Dates (publication_date, session_date, legal_date, etc.) and locations (impact_location, context_location)
   - Model: [svercoutere/longformer-classifier-refinement-abb](https://huggingface.co/svercoutere/longformer-classifier-refinement-abb)
-- **Translation**: HuggingFace, eTranslation (EU)
+- **Translation**: LangChain (Ollama, OpenAI, Mistral, …), HuggingFace, eTranslation (EU)
 - **Storage**: All annotations stored in SPARQL triplestore with full provenance
 
 ## Requirements
@@ -74,7 +74,7 @@ Used by the `translating` task.
 | Key | Values / Default | Effect |
 |---|---|---|
 | `target_language` | `en`, `nl`, `de`, `fr`, `es` | Language to translate into |
-| `provider` | `huggingface` *(default)*, `etranslation`, `langchain` | Which translation backend to use. `huggingface` runs locally (Helsinki-NLP OPUS-MT, no credentials needed). `etranslation` uses the EU Commission API (requires credentials). `langchain` delegates to a configurable LLM backend (e.g. Ollama, OpenAI, Mistral) |
+| `provider` | `langchain` *(default)*, `huggingface`, `etranslation` | Which translation backend to use. `huggingface` runs locally (Helsinki-NLP OPUS-MT, no credentials needed). `etranslation` uses the EU Commission API (requires credentials). `langchain` delegates to a configurable LLM backend (e.g. Ollama, OpenAI, Mistral) |
 
 **`etranslation` sub-keys** (only relevant when `provider` is `etranslation`):
 

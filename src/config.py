@@ -144,7 +144,7 @@ class TranslationConfig(BaseModel):
         description="Default target language for translations"
     )
     provider: Literal["huggingface", "etranslation", "langchain"] = Field(
-        default="huggingface",
+        default="langchain",
         description="Translation provider to use"
     )
     etranslation: ETranslationConfig = Field(
