@@ -163,25 +163,24 @@ class TranslationConfig(BaseModel):
         return v.strip().lower() if isinstance(v, str) else v
 
 
-class SegmentationConfig(BaseModel):
-    """Segmentation model configuration for document structure extraction."""
-    
+class LlmConfig(BaseModel):
+    """LLM provider configuration for the segmentation task."""
+
+    provider: str = Field(
+        default="ollama",
+        description="LangChain provider name, e.g. 'ollama', 'openai', 'mistral', 'azure_openai'"
+    )
     model_name: str = Field(
-        default="gpt-4.1",
-        description="LLM deployment / model name"
+        default="mistral-nemo",
+        description="Model name as understood by the provider"
     )
     api_key: SecretStr | None = Field(
         default=None,
-        description="API key for the LLM endpoint"
+        description="API key for the provider"
     )
-    endpoint: str | None = Field(
+    base_url: str | None = Field(
         default=None,
-        description="API endpoint URL for the LLM service"
-    )
-    max_new_tokens: int = Field(
-        default=14000,
-        ge=100,
-        description="Maximum tokens to generate"
+        description="Custom base URL (required for Ollama and self-hosted endpoints)"
     )
     temperature: float = Field(
         default=0.0,
@@ -190,6 +189,19 @@ class SegmentationConfig(BaseModel):
         description="Generation temperature (lower = more deterministic)"
     )
 
+
+class SegmentationConfig(BaseModel):
+    """Segmentation model configuration for document structure extraction."""
+
+    llm: LlmConfig = Field(
+        default_factory=LlmConfig,
+        description="LLM provider and model settings"
+    )
+    max_new_tokens: int = Field(
+        default=14000,
+        ge=100,
+        description="Maximum tokens to generate"
+    )
     max_gap: int = Field(
         default=5,
         description="Maximum character gap allowed when projecting segments back to original text. "
