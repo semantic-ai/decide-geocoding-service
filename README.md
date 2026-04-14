@@ -109,14 +109,17 @@ Used by `entity-extracting` (title extraction) and `model-annotating` (SDG class
 ---
 
 ### `segmentation`
-Used by the `segmenting` task.
+Used by the `segmenting` task. Settings are split between top-level keys and the nested `llm` block.
 
 | Key | Default | Effect |
 |---|---|---|
-| `model_name` | `gpt-4.1` | Set to `wdmuer/decide-marked-segmentation` to use the local specialized model instead of a generic LLM |
-| `api_key` / `endpoint` | `null` | Required for external LLM endpoints |
-| `max_new_tokens` | `14000` | Generation budget; reduce for faster but potentially truncated output |
-| `temperature` | `0.1` | Lower = more deterministic segmentation |
+| `max_new_tokens` | `14000` | Generation budget for GemmaSegmentor; not used by LLMSegmentor |
+| `max_gap` | `5` | Maximum character gap allowed when projecting segments back to the source expression |
+| `llm.provider` | `ollama` | LangChain provider name (`ollama`, `openai`, `mistral`, `azure_openai`, …) |
+| `llm.model_name` | `mistral-nemo` | Model name. Set to `wdmuer/decide-marked-segmentation` to use the local GemmaSegmentor instead |
+| `llm.api_key` | `null` | API key — required for external providers (OpenAI, Mistral, …) |
+| `llm.base_url` | `null` | Custom endpoint URL — required for Ollama and self-hosted models |
+| `llm.temperature` | `0.0` | Lower = more deterministic segmentation |
 
 ---
 
@@ -172,27 +175,46 @@ Nominatim is included in docker-compose. First startup can take longer than usua
 The service supports two different segmentation models, configurable via `config.json`.
 
 ### 1. LLMSegmentor (Generic LLM)
-Default usage for general LLMs (OpenAI, Azure OpenAI, Mistral, Ollama, etc.). It instructs the model to return JSON structure.
+Default. Works with any LangChain-supported provider (OpenAI, Ollama, Mistral, Azure OpenAI, …). Instructs the model to return tagged JSON.
 
-**Configuration in `config.json`:**
+**Example — Ollama (`config.json`):**
 ```json
 "segmentation": {
-  "model_name": "gpt-4.1",       // Your model deployment name
-  "api_key": "YOUR_KEY",
-  "endpoint": "YOUR_ENDPOINT",
-  "temperature": 0.1,
-  "max_new_tokens": 14000
+  "llm": {
+    "provider": "ollama",
+    "model_name": "mistral-nemo",
+    "base_url": "http://ollama:11434",
+    "temperature": 0.0
+  },
+  "max_new_tokens": 20000,
+  "max_gap": 5
+}
+```
+
+**Example — OpenAI:**
+```json
+"segmentation": {
+  "llm": {
+    "provider": "openai",
+    "model_name": "gpt-4.1",
+    "api_key": "YOUR_KEY",
+    "temperature": 0.0
+  },
+  "max_new_tokens": 20000,
+  "max_gap": 5
 }
 ```
 
 ### 2. GemmaSegmentor (Specialized Model)
-Uses the specialized `wdmuer/decide-marked-segmentation` model which is trained to output XML tags directly. Use this if you want to reproduce the original/legacy behavior.
+Uses the specialized `wdmuer/decide-marked-segmentation` model which outputs XML tags directly. Legacy behaviour.
 
-**To enable this mode**, you must set the `model_name` specifically:
+**To enable**, set `llm.model_name` to the exact model ID:
 ```json
 "segmentation": {
-  "model_name": "wdmuer/decide-marked-segmentation",
-  "max_new_tokens": 4000
-  // ... other fields as needed
+  "llm": {
+    "model_name": "wdmuer/decide-marked-segmentation"
+  },
+  "max_new_tokens": 4000,
+  "max_gap": 5
 }
 ```
