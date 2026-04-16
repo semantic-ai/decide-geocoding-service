@@ -103,7 +103,7 @@ Used by `entity-extracting` (title extraction) and `model-annotating` (SDG class
 | Key | Default | Effect |
 |---|---|---|
 | `model_name` | `gpt-4o-mini` | OpenAI-compatible model name |
-| `api_key` | `null` | Required for OpenAI / Azure endpoints |
+| `api_key` | `null` | Required for external providers (OpenAI, Mistral, …) |
 | `temperature` | `0.1` | Lower = more deterministic output |
 
 ---
@@ -115,7 +115,7 @@ Used by the `segmenting` task. Settings are split between top-level keys and the
 |---|---|---|
 | `max_new_tokens` | `14000` | Generation budget for GemmaSegmentor; not used by LLMSegmentor |
 | `max_gap` | `5` | Maximum character gap allowed when projecting segments back to the source expression |
-| `llm.provider` | `ollama` | LangChain provider name (`ollama`, `openai`, `mistral`, `azure_openai`, …) |
+| `llm.provider` | `ollama` | LangChain provider name (`ollama`, `openai`, `mistral`, …) |
 | `llm.model_name` | `mistral-nemo` | Model name. Set to `wdmuer/decide-marked-segmentation` to use the local GemmaSegmentor instead |
 | `llm.api_key` | `null` | API key — required for external providers (OpenAI, Mistral, …) |
 | `llm.base_url` | `null` | Custom endpoint URL — required for Ollama and self-hosted models |
@@ -175,7 +175,7 @@ Nominatim is included in docker-compose. First startup can take longer than usua
 The service supports two different segmentation models, configurable via `config.json`.
 
 ### 1. LLMSegmentor (Generic LLM)
-Default. Works with any LangChain-supported provider (OpenAI, Ollama, Mistral, Azure OpenAI, …). Instructs the model to return tagged JSON.
+Default. Works with any LangChain-supported provider (OpenAI, Ollama, Mistral, …). Instructs the model to return tagged JSON.
 
 **Example — Ollama (`config.json`):**
 ```json
