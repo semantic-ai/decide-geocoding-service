@@ -25,10 +25,10 @@ except ImportError:
 class AbstractSegmentor(ABC):
     """Abstract base class for a segmentation strategy."""
     
-    def __init__(self, api_key: str = None, endpoint: str = None, model_name: str = None, temperature: float = 0.1, max_new_tokens: int = 2000):
+    def __init__(self, api_key: str = None, base_url: str = None, model_name: str = None, temperature: float = 0.1, max_new_tokens: int = 2000):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.api_key = api_key
-        self.endpoint = endpoint
+        self.base_url = base_url
         self.model_name = model_name
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
@@ -69,8 +69,8 @@ SEGMENTS:
 ```
 ['TITLE', 'PARTICIPANTS', 'MOTIVATION', 'PREVIOUS_DECISIONS', 'LEGAL_FRAMEWORK', 'DECISION', 'VOTING', 'ARTICLE']
 ```"""
-    def __init__(self, api_key: str = None, endpoint: str = None, model_name: str = "wdmuer/decide-marked-segmentation", temperature: float = 0.1, max_new_tokens: int = 4096):
-        super().__init__(api_key, endpoint, model_name, temperature, max_new_tokens)
+    def __init__(self, api_key: str = None, base_url: str = None, model_name: str = "wdmuer/decide-marked-segmentation", temperature: float = 0.1, max_new_tokens: int = 4096):
+        super().__init__(api_key, base_url, model_name, temperature, max_new_tokens)
    
 
     def get_generator(self):
@@ -440,15 +440,17 @@ class LLMSegmentor(AbstractSegmentor):
         "document_classification": {"default": "", "type": str}
         }
 
-    def __init__(self, api_key: str = None, endpoint: str = None, model_name: str = "gpt-4.1", temperature: float = 0.0, max_new_tokens: int = 14000):
-        super().__init__(api_key, endpoint, model_name, temperature, max_new_tokens)
+    def __init__(self, api_key: str = None, base_url: str = None, model_name: str = "mistral-nemo", temperature: float = 0.0, max_new_tokens: int = 14000, provider: str = "ollama"):
+        super().__init__(api_key, base_url, model_name, temperature, max_new_tokens)
         if LLMAnalyzer is None:
              raise ImportError("LLMAnalyzer class is not available.")
-        
+
         self.analyzer = LLMAnalyzer(
-            api_key=self.api_key, 
-            endpoint=self.endpoint, 
-            deployment=self.model_name
+            provider=provider,
+            model_name=self.model_name,
+            api_key=self.api_key,
+            base_url=self.base_url,
+            temperature=self.temperature,
         )
 
     def format_segment(self, segment: Dict[str, Any]) -> Dict[str, Any]:
@@ -461,7 +463,7 @@ class LLMSegmentor(AbstractSegmentor):
         }
 
     async def async_segment(self, text: str) -> List[Dict[str, Any]]:
-        self.logger.info(f"Running LLM segmentation with {self.analyzer.deployment}...")
+        self.logger.info(f"Running LLM segmentation with {self.analyzer.model_name}...")
         
         try:
              result = await self.analyzer.analyze_single_entry(
@@ -469,9 +471,7 @@ class LLMSegmentor(AbstractSegmentor):
                 system_prompt=self.SYSTEM_PROMPT_REFERENCES_SEGMENTATION,
                 user_prompt_template=self.USER_PROMPT_TEMPLATE_REFERENCES_SEGMENTATION,
                 expected_schema=self.RESULTS_SCHEMA_SEGMENTATION,
-                max_tokens=self.max_new_tokens,
-                temperature=self.temperature,
-                text_limit=28000
+                text_limit=28000,
             )
         except Exception as e:
             self.logger.error(f"LLM segmentation failed: {e}")
