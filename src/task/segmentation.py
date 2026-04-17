@@ -160,10 +160,10 @@ class SegmentationTask(DecisionTask):
                 'label', 'UNKNOWN').replace(" ", "_").lower()
             segment_text = segment.get('text', '')
 
-            # Use segment label as predicate (e.g., "ex:TITLE", "ex:PARTICIPANTS")
+            # Use segment label as predicate (e.g., "ext:participants")
             # Convert to proper predicate format
 
-            predicate = f"ex:{segment_label}"
+            predicate = f"ext:{segment_label}"
             segment_uri = RelationExtractionAnnotation(
                 subject=source_uri,
                 predicate=predicate,
@@ -284,7 +284,10 @@ class SegmentationTask(DecisionTask):
             # Segment English text
             segmentor = self._create_segmentor()
             segments = segmentor.segment(target_english_text)
-            self.logger.info(f"Segmentor returned {len(segments)} segments")
+
+            # Explicitly exclude title segments as this is already done in PDF content extraction service
+            segments = [segment for segment in segments if segment["label"].lower() != "title"]
+            self.logger.info(f"Excluded returned {len(segments)} segments, excluding titles")
 
             segment_uris = self.create_segment_annotations(target_expression_uri, segments)
             for segment_uri in segment_uris:
