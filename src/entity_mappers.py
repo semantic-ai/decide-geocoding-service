@@ -340,16 +340,6 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         )
         created.append(ann1)
 
-        # Session created a realization of the work
-        ann2 = _annotate(
-            task,
-            subject=session_uri,
-            predicate="eli-dl:created_a_realization_of",
-            obj=sparql_escape_uri(work_uri),
-            source_uri=expression_uri,
-            entity=entity,
-        )
-        created.append(ann2)
         return created
 
     # Mandatary / participant person during session.
@@ -379,16 +369,6 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         )
         created.append(ann1)
 
-        # Link the session to the work (same as SESSION_DATE does)
-        ann2 = _annotate(
-            task,
-            subject=session_uri,
-            predicate="eli-dl:created_a_realization_of",
-            obj=sparql_escape_uri(work_uri),
-            source_uri=expression_uri,
-            entity=entity,
-        )
-        created.append(ann2)
         return created
 
     # Legal grounds: cited work with label.
