@@ -9,8 +9,8 @@ from langchain_core.messages import SystemMessage, HumanMessage
 class LLMAnalyzer:
     """
     Analyzer that routes LLM calls through LangChain's init_chat_model factory.
-    Supports any provider recognised by LangChain (openai, ollama, mistral,
-    azure_openai, …) purely through configuration — no if/else branching.
+    Supports any provider recognised by LangChain (openai, ollama, mistral, …)
+    purely through configuration — no if/else branching.
     """
 
     def __init__(
