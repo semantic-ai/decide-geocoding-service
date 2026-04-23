@@ -35,30 +35,19 @@ class TranslationTask(DecisionTask):
             provider = config.translation.provider.lower()
             self.logger.info(f"Initializing translator provider: {provider}")
 
-            if provider == "auto":
-                self._translator = Translator()
-            else:
-                registry = {
-                    "google": ("translatepy.translators.google", "GoogleTranslate", True),
-                    "microsoft": ("translatepy.translators.microsoft", "MicrosoftTranslate", True),
-                    "deepl": ("translatepy.translators.deepl", "DeeplTranslate", True),
-                    "libre": ("translatepy.translators.libre", "LibreTranslate", True),
-                    "huggingface": ("translation_plugin_huggingface", "HuggingFaceTranslateService", False),
-                    "etranslation": ("translation_plugin_etranslation", "ETRanslationService", False),
-                    "ollama": ("translation_plugin_ollama", "OllamaTranslateService", False),
-                }
+            registry = {
+                "huggingface": ("translation_plugin_huggingface", "HuggingFaceTranslateService"),
+                "etranslation": ("translation_plugin_etranslation", "ETRanslationService"),
+                "langchain": ("translation_plugin_langchain", "LangChainTranslateService"),
+            }
 
-                module_name, class_name, is_external = registry.get(
-                    provider, registry.get("etranslation", registry["huggingface"]))
-                module_path = module_name if is_external else f"..{module_name}"
-                self.logger.info(f"Loading translation module: {module_path}, class: {class_name}, provider: {provider}")
-                if is_external:
-                    module = importlib.import_module(module_path)
-                else:
-                    module = importlib.import_module(module_path, package=__package__)
-                service_cls = getattr(module, class_name)
-                service = service_cls()
-                self._translator = Translator(services_list=[service])
+            module_name, class_name = registry.get(provider, registry["etranslation"])
+            module_path = f"..{module_name}"
+            self.logger.info(f"Loading translation module: {module_path}, class: {class_name}, provider: {provider}")
+            module = importlib.import_module(module_path, package=__package__)
+            service_cls = getattr(module, class_name)
+            service = service_cls()
+            self._translator = Translator(services_list=[service])
 
             self.logger.info("Translator initialized successfully")
 
