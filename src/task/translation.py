@@ -10,7 +10,7 @@ from translatepy import Translator
 from escape_helpers import sparql_escape_uri, sparql_escape_string
 
 from decide_ai_service_base.task import DecisionTask
-from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES, LANGUAGE_CODE_TO_URI, LANGUAGE_URI_TO_CODE
+from decide_ai_service_base.sparql_config import get_prefixes_for_query, SPARQL_PREFIXES, GRAPHS, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES, LANGUAGE_CODE_TO_URI, LANGUAGE_URI_TO_CODE
 from decide_ai_service_base.annotation import RelationExtractionAnnotation
 
 from ..config import get_config
@@ -164,21 +164,28 @@ class TranslationTask(DecisionTask):
         Returns:
             URI of the created translated expression
         """
-        translated_expr_uri = f"http://example.org/{uuid4()}"
+        translated_expr_uri = f"{SPARQL_PREFIXES["expressions"]}{uuid4()}"
         target_graph_uri = graph_uri or GRAPHS["ai"]
 
         realizes_triple = ""
+        is_realized_by_triple = ""
         if work_uri:
             realizes_triple = f"{sparql_escape_uri(translated_expr_uri)} eli:realizes {sparql_escape_uri(work_uri)} ."
+            is_realized_by_triple = f"{sparql_escape_uri(work_uri)} eli:is_realized_by {sparql_escape_uri(translated_expr_uri)} ."
+
+        translation_triple = f"{sparql_escape_uri(source_expression_uri)} <{SPARQL_PREFIXES['linguistics_translations']}> {sparql_escape_uri(translated_expr_uri)} ."
 
         query_string = (
-            get_prefixes_for_query("eli", "epvoc") +
+            get_prefixes_for_query("eli", "epvoc", "mu") +
             f"""
             INSERT {{
               GRAPH {sparql_escape_uri(target_graph_uri)} {{
                 {sparql_escape_uri(translated_expr_uri)} a eli:Expression ;
+                    mu:uuid "{str(uuid.uuid4())}" ;
                     epvoc:expressionContent {sparql_escape_string(translated_text)} .
                 {realizes_triple}
+                {is_realized_by_triple}
+                {translation_triple}
               }}
             }} WHERE {{
             }}

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from helpers import update, query
 from escape_helpers import sparql_escape_uri, sparql_escape_string, sparql_escape_date
 
-from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, AI_COMPONENTS, AGENT_TYPES
+from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, AI_COMPONENTS, AGENT_TYPES, SPARQL_PREFIXES
 from decide_ai_service_base.annotation import RelationExtractionAnnotation
 
 
@@ -161,10 +161,12 @@ def _get_or_create_session_for_work(task, work_uri: Optional[str]) -> Optional[s
     if work_uri in cache:
         return cache[work_uri]
 
-    session_uri = f"https://data.lblod.info/id/session/{uuid.uuid4()}"
+    session_uuid = uuid.uuid4()
+    session_uri = f"https://data.lblod.info/id/session/{session_uuid}"
 
     insert_body = f"""
     {sparql_escape_uri(session_uri)} a eli-dl:Activity ;
+        mu:uuid "{str(session_uuid)}" ;
         eli-dl:had_activity_type besluit:Zitting .
 """
     _insert_triples(insert_body)
@@ -186,7 +188,7 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
     Args:
         task: The active EntityExtractionTask instance; provides task_uri for provenance and logging.
         work_uri: Optional URI of the decision eli:Work related to the expression. Some labels (e.g. dates, legal grounds) require this to be present; when it's missing, those labels become no-ops.
-        expression_uri: URI of the expression where the entity was detected. This becomes the oa:source in the annotation's target.
+        expression_uri: URI of the expression where the entity was detected. This becomes the oa:hasSource in the annotation's target.
         entity: Dict representing a single NER entity, typically with keys text, label, start, end and confidence.
 
     Returns:
@@ -253,6 +255,7 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         end_literal = begin_literal  # minimal: same date for start/end
         insert_body = f"""
     {sparql_escape_uri(period_uri)} a {sparql_escape_uri("http://www.w3.org/2006/time#ProperInterval")} ;
+        mu:uuid "{period_id}" ;
         {sparql_escape_uri("http://www.w3.org/2006/time#hasBeginning")} {begin_literal} ;
         {sparql_escape_uri("http://www.w3.org/2006/time#hasEnd")} {end_literal} .
 """
@@ -284,10 +287,10 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
     {sparql_escape_uri(period_uri)} a {sparql_escape_uri("http://www.w3.org/2006/time#ProperInterval")} ;
         {sparql_escape_uri("http://www.w3.org/2006/time#hasBeginning")} {begin_literal} ;
         {sparql_escape_uri("http://www.w3.org/2006/time#hasEnd")} {end_literal} ;
-        mu:uuid {sparql_escape_string(period_id)} .
+        mu:uuid "{period_id}" .
 
     {sparql_escape_uri(nb_uri)} a {sparql_escape_uri("https://data.vlaanderen.be/ns/omgevingsvergunning#NormatieveBepaling")} ;
-        mu:uuid {sparql_escape_string(nb_id)} ;
+        mu:uuid "{nb_id}" ;
         dct:extent {sparql_escape_uri(period_uri)} .
 """
         _insert_triples(insert_body)
@@ -337,16 +340,6 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         )
         created.append(ann1)
 
-        # Session created a realization of the work
-        ann2 = _annotate(
-            task,
-            subject=session_uri,
-            predicate="eli-dl:created_a_realization_of",
-            obj=sparql_escape_uri(work_uri),
-            source_uri=expression_uri,
-            entity=entity,
-        )
-        created.append(ann2)
         return created
 
     # Mandatary / participant person during session.
@@ -356,12 +349,14 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         if not session_uri:
             return created
 
-        person_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
+        person_uuid = uuid.uuid4()
+        person_uri = f"{SPARQL_PREFIXES["people"]}{person_uuid}"
         name_literal = sparql_escape_string(entity.get("text", ""))
         insert_body = f"""
-    {sparql_escape_uri(person_uri)} a foaf:Person ;
-        rdfs:label {name_literal} .
-"""
+            {sparql_escape_uri(person_uri)} a foaf:Person ;
+            mu:uuid "{str(person_uuid)}" ;
+            rdfs:label {name_literal} .
+        """
         _insert_triples(insert_body)
 
         ann1 = _annotate(
@@ -374,24 +369,16 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
         )
         created.append(ann1)
 
-        # Link the session to the work (same as SESSION_DATE does)
-        ann2 = _annotate(
-            task,
-            subject=session_uri,
-            predicate="eli-dl:created_a_realization_of",
-            obj=sparql_escape_uri(work_uri),
-            source_uri=expression_uri,
-            entity=entity,
-        )
-        created.append(ann2)
         return created
 
     # Legal grounds: cited work with label.
     if label == "LEGAL_GROUNDS":
-        cited_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
+        cited_uuid = uuid.uuid4()
+        cited_uri = f"{SPARQL_PREFIXES["legal_expressions"]}{cited_uuid}"
         label_literal = sparql_escape_string(entity.get("text", ""))
         insert_body = f"""
     {sparql_escape_uri(cited_uri)} a eli:Work ;
+        mu:uuid "{str(cited_uuid)}" ;
         rdfs:label {label_literal} .
 """
         _insert_triples(insert_body)
@@ -409,10 +396,12 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
 
     # Administrative body: organization that passed the decision.
     if label == "ADMINISTRATIVE_BODY":
-        org_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
+        org_uuid = uuid.uuid4()
+        org_uri = f"{SPARQL_PREFIXES["organizations"]}{org_uuid}"
         label_literal = sparql_escape_string(entity.get("text", ""))
         insert_body = f"""
     {sparql_escape_uri(org_uri)} a {sparql_escape_uri("http://www.w3.org/ns/org#Organization")} ;
+        mu:uuid "{str(org_uuid)}" ;
         rdfs:label {label_literal} .
 """
         _insert_triples(insert_body)
@@ -430,10 +419,12 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
 
     # Context location: general spatial context for the work.
     if label == "CONTEXT_LOCATION":
-        loc_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
+        loc_uuid = uuid.uuid4()
+        loc_uri = f"{SPARQL_PREFIXES["locations"]}{loc_uuid}"
         label_literal = sparql_escape_string(entity.get("text", ""))
         insert_body = f"""
     {sparql_escape_uri(loc_uri)} a dct:Location ;
+        mu:uuid "{str(loc_uuid)}" ;
         rdfs:label {label_literal} .
 """
         _insert_triples(insert_body)
@@ -451,10 +442,12 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
 
     # Impact location: where the decision has effect.
     if label == "IMPACT_LOCATION":
-        loc_uri = f"http://www.example.org/id/.well-known/genid/{uuid.uuid4()}"
+        loc_uuid = uuid.uuid4()
+        loc_uri = f"{SPARQL_PREFIXES["locations"]}{loc_uuid}"
         label_literal = sparql_escape_string(entity.get("text", ""))
         insert_body = f"""
     {sparql_escape_uri(loc_uri)} a dct:Location ;
+        mu:uuid "{str(loc_uuid)}" ;
         rdfs:label {label_literal} .
 """
         _insert_triples(insert_body)
