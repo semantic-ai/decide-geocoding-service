@@ -46,8 +46,7 @@ class TranslationTask(DecisionTask):
             self.logger.info(f"Loading translation module: {module_path}, class: {class_name}, provider: {provider}")
             module = importlib.import_module(module_path, package=__package__)
             service_cls = getattr(module, class_name)
-            service = service_cls()
-            self._translator = Translator(services_list=[service])
+            self._translator = service_cls()
 
             self.logger.info("Translator initialized successfully")
 
