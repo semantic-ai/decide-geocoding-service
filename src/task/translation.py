@@ -283,23 +283,10 @@ class TranslationTask(DecisionTask):
                 "work_uris": [],
             }
 
-        seen: dict[str, int] = {}
-        expression_uris: list[str] = []
-        expression_contents: list[str] = []
-        languages: list[str] = []
-        work_uris: list[str] = []
-
-        for b in bindings:
-            uri = b["expression"]["value"]
-            content = b["content"]["value"]
-            if uri in seen:
-                expression_contents[seen[uri]] += content
-            else:
-                seen[uri] = len(expression_uris)
-                expression_uris.append(uri)
-                expression_contents.append(content)
-                languages.append(b["lang"]["value"])
-                work_uris.append(b["work"]["value"])
+        expression_uris = [b["expression"]["value"] for b in bindings]
+        expression_contents = [b["content"]["value"] for b in bindings]
+        languages = [b["lang"]["value"] for b in bindings]
+        work_uris = [b["work"]["value"] for b in bindings]
 
         return {
             "expression_uris": expression_uris,
