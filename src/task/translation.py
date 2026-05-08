@@ -212,6 +212,24 @@ class TranslationTask(DecisionTask):
             f"Created translated expression {translated_expr_uri} in graph {target_graph_uri} (language: {target_language})")
         return translated_expr_uri
 
+    def get_target_graph(self) -> str | None:
+        """Try to resolve an optional target graph from the job linked to this task."""
+        q = Template(
+            """
+            PREFIX dct: <http://purl.org/dc/terms/>
+            PREFIX ext: <http://mu.semte.ch/vocabularies/ext/>
+            SELECT ?graph WHERE {
+                $task dct:isPartOf ?job .
+                ?job ext:graphForTargets ?graph .
+            }
+            """
+        ).substitute(task=sparql_escape_uri(self.task_uri))
+        res = query(q, sudo=True)
+        bindings = res.get("results", {}).get("bindings", [])
+        if not bindings:
+            return None
+        return bindings[0]["graph"]["value"]
+
     def fetch_eli_expressions(self) -> dict[str, list[str]]:
         """
         Retrieve ELI expressions, their epvoc:expressionContent,
@@ -224,6 +242,10 @@ class TranslationTask(DecisionTask):
                 - "languages": list containing the language URIs of the expressions
                 - "work_uris": list containing the work URIs of the expressions
         """
+        target_graph = self.get_target_graph()
+        expressions_graph = sparql_escape_uri(target_graph if target_graph else GRAPHS["expressions"])
+        works_graph = sparql_escape_uri(target_graph if target_graph else GRAPHS["works"])
+
         q = Template(
             get_prefixes_for_query("task", "epvoc", "eli") +
             f"""
@@ -236,13 +258,13 @@ class TranslationTask(DecisionTask):
                 ?container task:hasResource ?expression .
             }}
 
-            GRAPH {sparql_escape_uri(GRAPHS["expressions"])} {{
+            GRAPH {expressions_graph} {{
                 ?expression a eli:Expression ;
                             epvoc:expressionContent ?content ;
                             eli:language ?lang .
             }}
 
-            GRAPH {sparql_escape_uri(GRAPHS["works"])} {{
+            GRAPH {works_graph} {{
                 ?work a eli:Work ;
                     eli:is_realized_by ?expression .
             }}
