@@ -8,7 +8,6 @@ langchain-core
 langchain-openai
 langchain-ollama
 langchain-mistralai
--f https://download.pytorch.org/whl/cpu
 torch
 flair
 transformers
