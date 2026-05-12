@@ -4,7 +4,7 @@ import langdetect
 from typing import Optional
 
 from uuid import uuid4
-from helpers import query, update
+from helpers import query, update, logger
 from string import Template
 from translatepy import Translator
 from escape_helpers import sparql_escape_uri, sparql_escape_string
@@ -33,7 +33,7 @@ class TranslationTask(DecisionTask):
         if self._translator is None:
             config = get_config()
             provider = config.translation.provider.lower()
-            self.logger.info(f"Initializing translator provider: {provider}")
+            logger.info(f"Initializing translator provider: {provider}")
 
             registry = {
                 "huggingface": ("translation_plugin_huggingface", "HuggingFaceTranslateService"),
@@ -43,13 +43,13 @@ class TranslationTask(DecisionTask):
 
             module_name, class_name = registry.get(provider, registry["etranslation"])
             module_path = f"..{module_name}"
-            self.logger.info(f"Loading translation module: {module_path}, class: {class_name}, provider: {provider}")
+            logger.info(f"Loading translation module: {module_path}, class: {class_name}, provider: {provider}")
             module = importlib.import_module(module_path, package=__package__)
             service_cls = getattr(module, class_name)
             service = service_cls()
             self._translator = Translator(services_list=[service])
 
-            self.logger.info("Translator initialized successfully")
+            logger.info("Translator initialized successfully")
 
         return self._translator
 
@@ -90,13 +90,13 @@ class TranslationTask(DecisionTask):
         if language_uri:
             lang_code = LANGUAGE_URI_TO_CODE.get(language_uri)
             if lang_code:
-                self.logger.info(
+                logger.info(
                     f"Retrieved source language from database: {lang_code}")
                 return lang_code
-            self.logger.warning(f"Unknown language URI: {language_uri}")
+            logger.warning(f"Unknown language URI: {language_uri}")
 
         # Fallback: detect language from content
-        self.logger.warning(
+        logger.warning(
             "No language found in database, detecting from content...")
         if not content:
             content = self.fetch_data()
@@ -108,16 +108,16 @@ class TranslationTask(DecisionTask):
         # Limit text length for language detection to avoid hanging on very long text
         # langdetect can be slow/hang on very long text, so use first 1000 chars
         text_for_detection = content[:1000] if len(content) > 1000 else content
-        self.logger.debug(
+        logger.debug(
             f"Using {len(text_for_detection)} chars (of {len(content)}) for language detection")
 
         try:
             detected_lang = langdetect.detect(text_for_detection)
-            self.logger.info(
+            logger.info(
                 f"Detected language from content: {detected_lang}")
             return detected_lang
         except Exception as e:
-            self.logger.error(
+            logger.error(
                 f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
             return "nl"  # Default to Dutch for Belgian documents
 
@@ -128,7 +128,7 @@ class TranslationTask(DecisionTask):
         lang_uri = LANGUAGE_CODE_TO_URI.get(language)
         if not lang_uri:
             error_msg = f"Unsupported language code '{language}' - cannot create language annotation"
-            self.logger.error(error_msg)
+            logger.error(error_msg)
             raise ValueError(error_msg)
         RelationExtractionAnnotation(
             subject=source_uri,
@@ -208,7 +208,7 @@ class TranslationTask(DecisionTask):
                 agent_type=AGENT_TYPES["ai_component"],
             ).add_to_triplestore_if_not_exists()
 
-        self.logger.info(
+        logger.info(
             f"Created translated expression {translated_expr_uri} in graph {target_graph_uri} (language: {target_language})")
         return translated_expr_uri
 
@@ -274,7 +274,7 @@ class TranslationTask(DecisionTask):
 
         bindings = query(q, sudo=True).get("results", {}).get("bindings", [])
         if not bindings:
-            self.logger.warning(
+            logger.warning(
                 f"No expressions found in input container for task {self.task_uri}")
             return {
                 "expression_uris": [],
@@ -342,43 +342,43 @@ class TranslationTask(DecisionTask):
             source_language = LANGUAGE_URI_TO_CODE.get(
                 eli_expressions["languages"][i], None)
             work_uri = eli_expressions["work_uris"][i]
-            self.logger.info(
+            logger.info(
                 f"Processing translation for source: {source_expression_uri}")
 
             # If there's no content, skip early
             if not original_text or not original_text.strip():
-                self.logger.warning(
+                logger.warning(
                     "No content found for source; skipping translation")
                 return
 
             # Ensure we have an explicit source language
             if not source_language or source_language.lower() == "auto":
-                self.logger.warning(
+                logger.warning(
                     "Source language was 'auto' or missing, detecting from content...")
                 try:
                     # Limit text length for language detection to avoid hanging on very long text
                     text_for_detection = original_text[:1000] if len(
                         original_text) > 1000 else original_text
-                    self.logger.debug(
+                    logger.debug(
                         f"Using {len(text_for_detection)} chars (of {len(original_text)}) for language detection")
                     source_language = langdetect.detect(text_for_detection)
-                    self.logger.info(
+                    logger.info(
                         f"Detected source language: {source_language}")
                 except Exception as e:
-                    self.logger.error(
+                    logger.error(
                         f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
                     source_language = "nl"  # Default to Dutch for Belgian documents
 
             # Skip translation if already in target language
             if source_language.lower() == self.target_language.lower():
-                self.logger.info(
+                logger.info(
                     f"Text is already in target language ({self.target_language}), skipping translation")
                 return
 
             # Get translator and translate
             translator = self.get_translator()
 
-            self.logger.info(
+            logger.info(
                 f"Translating from {source_language} to {self.target_language}")
 
             # Use translatepy's translate method
@@ -391,9 +391,9 @@ class TranslationTask(DecisionTask):
             # Extract the translated text from the result
             translated_text = translation_result.result
             service_used = translation_result.service
-            self.logger.info(f"Translation service used: {service_used}")
+            logger.info(f"Translation service used: {service_used}")
 
-            self.logger.info(f"Translation completed.")
+            logger.info(f"Translation completed.")
 
             # Create a new eli:Expression for the translated text
             normalized_target_lang = self.target_language.lower()
@@ -408,7 +408,7 @@ class TranslationTask(DecisionTask):
             self.create_language_relation(
                 translated_expression_uri, normalized_target_lang)
 
-            self.logger.info(
+            logger.info(
                 f"Translation stored as new expression: {translated_expression_uri}")
 
             self.results_container_uris.append(

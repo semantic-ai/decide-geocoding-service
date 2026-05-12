@@ -4,6 +4,7 @@ from typing import Optional, Any
 from helpers import query, update
 from string import Template
 from escape_helpers import sparql_escape_uri, sparql_escape_string
+from helpers import logger
 
 from decide_ai_service_base.task import DecisionTask
 from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES, LANGUAGE_CODE_TO_URI, LANGUAGE_URI_TO_CODE
@@ -31,7 +32,7 @@ class EntityExtractionTask(DecisionTask):
         lang_uri = LANGUAGE_CODE_TO_URI.get(language)
         if not lang_uri:
             error_msg = f"Unsupported language code '{language}' - cannot create language annotation"
-            self.logger.error(error_msg)
+            logger.error(error_msg)
             raise ValueError(error_msg)
         RelationExtractionAnnotation(
             subject=source_uri,
@@ -74,7 +75,7 @@ class EntityExtractionTask(DecisionTask):
                 )
                 created_annotation_uris.extend(annotation_uris)
             except Exception as e:
-                self.logger.error(
+                logger.error(
                     f"Failed to map entity '{entity.get('text')}' "
                     f"({entity.get('label')}) for source {source_uri}: {e}",
                     exc_info=True,
@@ -97,13 +98,13 @@ class EntityExtractionTask(DecisionTask):
         if method is None:
             method = config.ner.method
 
-        self.logger.info(
+        logger.info(
             f"Extracting general entities using {method}/{language}")
 
         # Extract entities using the factory pattern
         entities = extract_entities(
             task_data, language=language, method=method)
-        self.logger.info(f"Found {len(entities)} general entities")
+        logger.info(f"Found {len(entities)} general entities")
 
         return entities
 
@@ -114,14 +115,14 @@ class EntityExtractionTask(DecisionTask):
         """
         work_uri = self.fetch_work_uri()
         if not work_uri:
-            self.logger.info(
+            logger.info(
                 f"No work found for expression {self.source}, cannot find English translation")
             return None
 
         # Get English language URI
         en_lang_uri = LANGUAGE_CODE_TO_URI.get("en")
         if not en_lang_uri:
-            self.logger.warning(
+            logger.warning(
                 "English language URI not found in LANGUAGE_CODE_TO_URI")
             return None
 
@@ -161,11 +162,11 @@ class EntityExtractionTask(DecisionTask):
         bindings = query_result.get("results", {}).get("bindings", [])
         if bindings and "en_expr" in bindings[0]:
             en_expr_uri = bindings[0]["en_expr"]["value"]
-            self.logger.info(
+            logger.info(
                 f"Found English expression {en_expr_uri} for work {work_uri}")
             return en_expr_uri
 
-        self.logger.info(f"No English expression found for work {work_uri}")
+        logger.info(f"No English expression found for work {work_uri}")
         return None
 
     def fetch_expression_data(self, expression_uri: str) -> str:
@@ -242,7 +243,7 @@ class EntityExtractionTask(DecisionTask):
 
         bindings = query(q, sudo=True).get("results", {}).get("bindings", [])
         if not bindings:
-            self.logger.warning(
+            logger.warning(
                 f"No expressions found in input container for task {self.task_uri}")
             return {
                 "expression_uris": [],
@@ -301,11 +302,11 @@ class EntityExtractionTask(DecisionTask):
             target_expression_uri = eli_expressions["expression_uris"][i]
             target_english_text = eli_expressions["expression_contents"][i]
 
-            self.logger.info(
+            logger.info(
                 f"Processing entity extraction for source: {target_expression_uri}")
 
             if not target_english_text or not target_english_text.strip():
-                self.logger.warning(
+                logger.warning(
                     "No content available for entity extraction")
                 continue
 
