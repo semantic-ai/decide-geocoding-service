@@ -25,7 +25,7 @@ from .ner_extractors import (
 logger = logging.getLogger(__name__)
 
 
-def get_composite_extractor(language: str) -> Optional[CompositeExtractor]:
+def get_composite_extractor(language: str) -> CompositeExtractor:
     if language == 'de':
         return create_german_composite_extractor()
     elif language == 'nl':
@@ -33,8 +33,10 @@ def get_composite_extractor(language: str) -> Optional[CompositeExtractor]:
     elif language == 'en':
         return create_english_composite_extractor()
     else:
-        logger.warning(f"Unsupported language '{language}' for composite extractor")
-        return None
+        raise ValueError(
+            f"Unsupported language '{language}' for composite extractor "
+            f"(supported: 'de', 'nl', 'en')"
+        )
 
 
 @cache
@@ -48,6 +50,9 @@ def get_extractor(language: str, extractor_type: str = 'composite'):
         
     Returns:
         Configured extractor instance
+
+    Raises:
+        ValueError: If extractor_type is not one of the supported types.
     """
     extractors = {
         'spacy': SpacyExtractor,
@@ -58,11 +63,12 @@ def get_extractor(language: str, extractor_type: str = 'composite'):
     }
 
     extractor = extractors.get(extractor_type)
-    if extractor is not None:
-        return extractor(language)
-    
-    logger.warning(f"Unsupported extractor type '{extractor_type}', returning None")
-    return None
+    if extractor is None:
+        raise ValueError(
+            f"Unsupported extractor type '{extractor_type}' for language '{language}' "
+            f"(supported: {sorted(extractors.keys())})"
+        )
+    return extractor(language)
 
 
 def extract_entities(text: str, language: str = None, method: str = None, refine: bool = None) -> List[Dict[str, Any]]:
@@ -79,8 +85,12 @@ def extract_entities(text: str, language: str = None, method: str = None, refine
                 Defaults to DEFAULT_SETTINGS['enable_refinement'].
         
     Returns:
-        List of entity dictionaries with keys: text, label, start, end
-        Returns empty list if extraction fails or method/language is unsupported.
+        List of entity dictionaries with keys: text, label, start, end.
+
+    Raises:
+        ValueError: If method or language is not supported.
+        Exception: Propagates any extractor or refiner failure to the caller
+            so the task framework can mark the task as failed.
     """
     # Use defaults from config if not provided
     config = get_config()
@@ -90,24 +100,16 @@ def extract_entities(text: str, language: str = None, method: str = None, refine
         method = config.ner.method
     if refine is None:
         refine = config.ner.enable_refinement
-    
-    # Get extractor (cached)
+
+    # Get extractor (cached). Raises ValueError on unsupported method/language.
     extractor = get_extractor(language, method)
-    
-    if extractor is None:
-        logger.warning(f"Unsupported method '{method}' for language '{language}', returning empty result")
-        return []
-    
-    try:
-        entities = extractor.extract(text)
-        
-        # Apply refinement if enabled
-        if refine and entities:
-            refiner = EntityRefiner()
-            entities = refiner.refine(entities, text)
-            logger.debug(f"Applied entity refinement to {len(entities)} entities")
-        
-        return entities
-    except Exception as e:
-        logger.warning(f"Entity extraction failed ({method}/{language}): {e}")
-        return []
+
+    entities = extractor.extract(text)
+
+    # Apply refinement if enabled
+    if refine and entities:
+        refiner = EntityRefiner()
+        entities = refiner.refine(entities, text)
+        logger.debug(f"Applied entity refinement to {len(entities)} entities")
+
+    return entities

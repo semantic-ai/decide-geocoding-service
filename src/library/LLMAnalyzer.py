@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
@@ -6,6 +7,8 @@ from pydantic import BaseModel
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage
 import json_repair
+
+logger = logging.getLogger(__name__)
 
 
 class LLMAnalyzer:
@@ -99,8 +102,10 @@ class LLMAnalyzer:
             return self._validate_result(result, expected_schema)
 
         except Exception as e:
-            print(f"Analysis error: {e}")
-            return self._create_error_result(expected_schema, f"Analysis failed: {str(e)}")
+            logger.exception("LLM analysis failed")
+            raise RuntimeError(
+                f"LLM analysis failed ({self._provider}:{self.model_name}): {e}"
+            ) from e
 
     def _parse_json(self, text: str) -> Dict[str, Any]:
         """Parse JSON from LLM response with multiple fallback strategies."""
@@ -268,16 +273,3 @@ class LLMAnalyzer:
                 validated_result[clean_key] = value if value is not None else schema_info
 
         return validated_result
-
-    def _create_error_result(self, expected_schema: Dict[str, Any], error_message: str) -> Dict[str, Any]:
-        error_result = {}
-
-        for key, schema_info in expected_schema.items():
-            clean_key = key.strip()
-            if isinstance(schema_info, dict) and "default" in schema_info:
-                error_result[clean_key] = schema_info["default"]
-            else:
-                error_result[clean_key] = schema_info
-
-        error_result["error"] = error_message
-        return error_result

@@ -40,12 +40,19 @@ class ModelManager:
             language: Language code ('de', 'nl', 'en')
             
         Returns:
-            Loaded spaCy model, or None if language not supported or model fails to load
+            Loaded spaCy model.
+
+        Raises:
+            ValueError: If no spaCy model is configured for the given language.
+            RuntimeError: If the configured spaCy model cannot be loaded
+                (e.g. the model package is not installed in the container).
         """
         if language not in NER_MODELS['spacy']:
-            logger.warning(f"spaCy model not available for language '{language}'")
-            return None
-        
+            raise ValueError(
+                f"No spaCy model configured for language '{language}' "
+                f"(configured: {sorted(NER_MODELS['spacy'].keys())})"
+            )
+
         model_name = NER_MODELS['spacy'][language]
         model_key = f"spacy_{language}"
         
@@ -53,9 +60,10 @@ class ModelManager:
             try:
                 self._models[model_key] = spacy.load(model_name)
             except OSError as e:
-                logger.warning(f"spaCy model '{model_name}' could not be loaded: {e}")
-                return None
-        
+                raise RuntimeError(
+                    f"Could not load spaCy model '{model_name}' for language '{language}': {e}"
+                ) from e
+
         return self._models[model_key]
     
     def get_flair_model(self, language: str = None, model_name: str = None):
@@ -67,7 +75,11 @@ class ModelManager:
             model_name: Flair model name (e.g., 'flair/ner-german-legal') - overrides language if provided
             
         Returns:
-            Loaded Flair SequenceTagger model, or None if not available
+            Loaded Flair SequenceTagger model.
+
+        Raises:
+            ValueError: If neither model_name nor a configured language is provided.
+            RuntimeError: If the Flair model cannot be downloaded or loaded.
         """
         # If model_name is provided, use it directly; otherwise use language from config
         if model_name:
@@ -75,18 +87,21 @@ class ModelManager:
         elif language and language in NER_MODELS['flair']:
             final_model_name = NER_MODELS['flair'][language]
         else:
-            logger.warning(f"Flair model not available for language '{language}'")
-            return None
-        
+            raise ValueError(
+                f"No Flair model configured for language '{language}' "
+                f"(configured: {sorted(NER_MODELS['flair'].keys())})"
+            )
+
         model_key = f"flair_{final_model_name.replace('/', '_')}"
-        
+
         if model_key not in self._models:
             try:
                 self._models[model_key] = SequenceTagger.load(final_model_name)
             except Exception as e:
-                logger.warning(f"Flair model '{final_model_name}' could not be loaded: {e}")
-                return None
-        
+                raise RuntimeError(
+                    f"Could not load Flair model '{final_model_name}': {e}"
+                ) from e
+
         return self._models[model_key]
     
     def get_huggingface_model(self, language: str):
@@ -97,11 +112,19 @@ class ModelManager:
             language: Language code ('nl', 'en')
             
         Returns:
-            Loaded Hugging Face pipeline for token classification, or None if language not supported
+            Loaded Hugging Face pipeline for token classification.
+
+        Raises:
+            ValueError: If no HuggingFace model is configured for the language.
+            RuntimeError: If the configured model cannot be downloaded or loaded.
         """
         if language not in NER_MODELS['huggingface']:
-            return None
-        
+            configured = [k for k in NER_MODELS['huggingface'].keys() if k != 'aggregation_strategy']
+            raise ValueError(
+                f"No HuggingFace model configured for language '{language}' "
+                f"(configured: {sorted(configured)})"
+            )
+
         model_name = NER_MODELS['huggingface'][language]
         aggregation_strategy = NER_MODELS['huggingface'].get('aggregation_strategy', 'simple')
         
@@ -117,9 +140,10 @@ class ModelManager:
                     device="cpu",
                 )
             except Exception as e:
-                logger.warning(f"HuggingFace model '{model_name}' could not be loaded: {e}")
-                return None
-        
+                raise RuntimeError(
+                    f"Could not load HuggingFace model '{model_name}' for language '{language}': {e}"
+                ) from e
+
         return self._models[model_key]
     
     def get_refinement_model(self):
@@ -133,15 +157,14 @@ class ModelManager:
             Tuple of (model, tokenizer) for the refinement classifier
             
         Raises:
-            Exception: If model cannot be loaded
+            RuntimeError: If the refinement model cannot be downloaded or loaded.
         """
         model_key = "refinement_model"
         tokenizer_key = "refinement_tokenizer"
         
         if model_key not in self._models:
+            model_name = NER_MODELS['refinement']['model']
             try:
-                model_name = NER_MODELS['refinement']['model']
-                
                 logger.info(f"Loading entity refinement model: {model_name}")
                 
                 # Load tokenizer with special entity markers
@@ -155,9 +178,10 @@ class ModelManager:
                 
                 logger.info(f"Successfully loaded entity refinement model")
             except Exception as e:
-                logger.warning(f"Entity refinement model could not be loaded: {e}")
-                return None, None
-        
+                raise RuntimeError(
+                    f"Could not load entity refinement model '{model_name}': {e}"
+                ) from e
+
         return self._models[model_key], self._models[tokenizer_key]
     
     def clear_cache(self):

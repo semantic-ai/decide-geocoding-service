@@ -2,7 +2,37 @@ import os
 import re
 import unicodedata
 import requests
-from typing import Optional
+from typing import Optional, Sequence
+
+
+def fail_if_no_successes(
+    label: str,
+    total: int,
+    successes: int,
+    errors: Sequence,
+) -> None:
+    """Raise ``RuntimeError`` if a per-item loop attempted work but no item succeeded.
+
+    Use at the end of a per-item processing loop where individual failures are
+    tolerated but a 0-of-N outcome should mark the surrounding task as failed.
+    The first three errors are included in the message so the
+    ``ext:ErrorMessage`` written by ``Task.run`` is actionable.
+
+    Args:
+        label: A short human-readable label identifying the loop (e.g.
+            ``"Entity mapping for <uri>"``).
+        total: Number of items that were attempted.
+        successes: Number of items that succeeded.
+        errors: Collected exceptions/messages (sample of up to 3 is included).
+
+    Raises:
+        RuntimeError: If ``total > 0`` and ``successes == 0``.
+    """
+    if total > 0 and successes == 0:
+        sample = list(errors)[:3]
+        raise RuntimeError(
+            f"{label}: 0/{total} succeeded. First errors: {sample}"
+        )
 
 
 def clean_string(input_string):
