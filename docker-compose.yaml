@@ -1,31 +1,41 @@
 services:
-  nominatim:
-    image: mediagis/nominatim:5.1
-    container_name: nominatim
-    networks:
-      - app-decide_default
-    expose:
-      - "8080"
-    environment:
-      - PBF_URL=https://download.geofabrik.de/europe/belgium-latest.osm.pbf
-    restart: unless-stopped
-    volumes:
-      - ./nominatim-data:/var/lib/postgresql/16/main
-
-  geocoding-service:
-    container_name: geocoding-service
+  ner-service:
     build:
       context: .
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp=unconfined
+    command: >
+      uv run python -m debugpy --wait-for-client --listen 0.0.0.0:5678 -m uvicorn web:app --host
+      0.0.0.0 --port 80 --proxy-headers --timeout-keep-alive 300 --workers 1
+      --reload --reload-dir /app 
     ports:
-      - "8082:80"
+      - "8086:80"
+      - "5678:5678"
     networks:
       - app-decide_default
     environment:
-      MU_SPARQL_ENDPOINT: http://virtuoso:8890/sparql
-      ALLOW_MU_AUTH_SUDO: "true"
+      TARGET_GRAPH: http://mu.semte.ch/graphs/harvesting
+      JOB_GRAPH: http://mu.semte.ch/graphs/harvesting
+      DATA_CONTAINER_GRAPH: http://mu.semte.ch/graphs/harvesting
+      HARVEST_COLLECTIONS_GRAPH: http://mu.semte.ch/graphs/harvesting
+      REMOTE_OBJECT_GRAPH: http://mu.semte.ch/graphs/harvesting
+      FILES_GRAPH: http://mu.semte.ch/graphs/harvesting
+      OPARL_TEMP_GRAPH: http://mu.semte.ch/graphs/harvesting
+      OSLO_TEMP_GRAPH: http://mu.semte.ch/graphs/harvesting
+
+      PUBLICATION_GRAPH: http://mu.semte.ch/graphs/public/pdf
+      EXPRESSIONS_GRAPH: http://mu.semte.ch/graphs/public/pdf
+      WORKS_GRAPH: http://mu.semte.ch/graphs/public/pdf
+      MANIFESTATIONS_GRAPH: http://mu.semte.ch/graphs/public/pdf
+      AI_GRAPH: http://mu.semte.ch/graphs/public/pdf
+      ALLOW_MU_AUTH_SUDO: true
+      CONFIG_PATH: /app/config.json
+    restart: no
     volumes:
       - ./:/app
-      - ./config.json:/app/config.json:ro  # Mount config as read-only
+      - ./config.json:/usr/src/app/config.json:ro
 
 networks:
   app-decide_default:

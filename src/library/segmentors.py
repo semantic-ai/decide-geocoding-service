@@ -4,6 +4,8 @@ import asyncio
 from abc import ABC, abstractmethod
 from span_aligner import SpanAligner
 from typing import Optional, Any, Type, List, Dict
+from helpers import logger
+from pydantic import BaseModel
 try:
     from transformers import pipeline as transformers_pipeline
 except ImportError:
@@ -26,7 +28,6 @@ class AbstractSegmentor(ABC):
     """Abstract base class for a segmentation strategy."""
     
     def __init__(self, api_key: str = None, base_url: str = None, model_name: str = None, temperature: float = 0.1, max_new_tokens: int = 2000):
-        self.logger = logging.getLogger(self.__class__.__name__)
         self.api_key = api_key
         self.base_url = base_url
         self.model_name = model_name
@@ -79,13 +80,13 @@ SEGMENTS:
             if transformers_pipeline is None:
                 raise ImportError("transformers library or pipeline not available")
             
-            self.logger.info(f"Loading segmentation model: {self.model_name}")
+            logger.info(f"Loading segmentation model: {self.model_name}")
             
             self.__class__._generator = transformers_pipeline(
                 "text-generation",
                 model=self.model_name,
             )
-            self.logger.info(f"Loaded segmentation model: {self.model_name}")
+            logger.info(f"Loaded segmentation model: {self.model_name}")
         return self.__class__._generator
 
     def _rstrip_with_tail(self, s: str) -> tuple[str, str]:
@@ -241,15 +242,15 @@ SEGMENTS:
                     'text': text
                 })
             else:
-                self.logger.warning(f"Could not find '{seg['label']}' in source: {text[:50]}...")
+                logger.warning(f"Could not find '{seg['label']}' in source: {text[:50]}...")
         
-        self.logger.info(f"Aligned {len(aligned_segments)}/{len(segments)} segments to source")
+        logger.info(f"Aligned {len(aligned_segments)}/{len(segments)} segments to source")
         return aligned_segments
 
 
     # Segmentation method
     def segment(self, text: str) -> List[Dict[str, Any]]:
-        self.logger.info("Running Gemma segmentation...")
+        logger.info("Running Gemma segmentation...")
         
         messages = [
             {"role": "system", "content": self.SYSTEM_INSTRUCTION},
@@ -273,6 +274,10 @@ SEGMENTS:
         # Align derived segments to original source
         return self.align_segments(text, segments)
 
+class SegmentationSchemaModel(BaseModel):
+    tagged_text: str = ""
+    document_classification: str = ""
+
 
 # Generic LLM-based segmentor that relies on the LLM to produce JSON output with tagged text, then extracts spans using the span_aligner package.
 class LLMSegmentor(AbstractSegmentor):
@@ -295,7 +300,7 @@ class LLMSegmentor(AbstractSegmentor):
 
     SYSTEM_PROMPT_REFERENCES_SEGMENTATION = """
     You are a precise document-segmentation and tagging assistant.
-    You must respond with valid JSON only.
+    You must respond with valid JSON only. Do not wrap the JSON in ```json fences.
 
     Core invariants (critical):
     - Preserve every character of the input text exactly (including whitespace, line breaks, punctuation, numbering, and layout).
@@ -440,6 +445,7 @@ class LLMSegmentor(AbstractSegmentor):
         "document_classification": {"default": "", "type": str}
         }
 
+
     def __init__(self, api_key: str = None, base_url: str = None, model_name: str = "mistral-nemo", temperature: float = 0.0, max_new_tokens: int = 14000, provider: str = "ollama"):
         super().__init__(api_key, base_url, model_name, temperature, max_new_tokens)
         if LLMAnalyzer is None:
@@ -462,11 +468,11 @@ class LLMSegmentor(AbstractSegmentor):
             "text": segment.get("text", "")
         }
 
-    async def async_segment(self, text: str) -> List[Dict[str, Any]]:
-        self.logger.info(f"Running LLM segmentation with {self.analyzer.model_name}...")
+    def segment(self, text: str) -> List[Dict[str, Any]]:
+        logger.info(f"Running LLM segmentation with {self.analyzer.model_name}...")
         
         try:
-             result = await self.analyzer.analyze_single_entry(
+             result = self.analyzer.analyze_single_entry(
                 text=text,
                 system_prompt=self.SYSTEM_PROMPT_REFERENCES_SEGMENTATION,
                 user_prompt_template=self.USER_PROMPT_TEMPLATE_REFERENCES_SEGMENTATION,
@@ -474,12 +480,12 @@ class LLMSegmentor(AbstractSegmentor):
                 text_limit=28000,
             )
         except Exception as e:
-            self.logger.error(f"LLM segmentation failed: {e}")
+            logger.error(f"LLM segmentation failed: {e}")
             return []
 
         tagged_text = result.get("tagged_text", "")
         if not tagged_text:
-            self.logger.warning("LLM returned empty tagged text.")
+            logger.warning("LLM returned empty tagged text.")
             return []
 
         # Project the tags onto the original text
@@ -496,18 +502,3 @@ class LLMSegmentor(AbstractSegmentor):
         )
         return [self.format_segment(span) for span in annotations.get("spans", [])]
 
-    def segment(self, text: str) -> List[Dict[str, Any]]:
-        # Check for existing event loop
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            # If in a running loop (e.g., Jupyter), run in a separate thread
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(asyncio.run, self.async_segment(text))
-                return future.result()
-        else:
-            return asyncio.run(self.async_segment(text))

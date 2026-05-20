@@ -21,8 +21,8 @@ class TranslationTask(DecisionTask):
 
     __task_type__ = TASK_OPERATIONS["translation"]
 
-    def __init__(self, task_uri: str):
-        super().__init__(task_uri)
+    def __init__(self, task_uri: str, *args, **kwargs):
+        super().__init__(task_uri, *args, **kwargs)
 
         config = get_config()
         self.target_language = config.translation.target_language

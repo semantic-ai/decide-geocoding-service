@@ -1,21 +1,29 @@
+import os
 import logging
+from threading import Lock
+from helpers import logger
 
 from src.airo import register_airo
 from src.task import TranslationTask, SegmentationTask, EntityExtractionTask
 from src.translation_plugin_etranslation import _callback_storage, _callback_lock
-from decide_ai_service_base.util import fail_busy_and_scheduled_tasks, process_open_tasks, wait_for_triplestore
+from decide_ai_service_base.util import fail_busy_and_scheduled_tasks, TaskProcessor, wait_for_triplestore, process_open_tasks
 from decide_ai_service_base.schema import NotificationResponse, TaskOperationsResponse
 from decide_ai_service_base.task import Task
 
 from fastapi import APIRouter, BackgroundTasks, Request
 
 
+_open_tasks_lock = Lock()
+
+
 @app.on_event("startup")
 async def startup_event():
+    logger.info("Startup running in PID %s", os.getpid())
     wait_for_triplestore()
     fail_busy_and_scheduled_tasks()
     register_airo()
     process_open_tasks()
+
 
 
 router = APIRouter()
@@ -23,7 +31,8 @@ router = APIRouter()
 
 @router.post("/delta", status_code=202)
 async def delta(background_tasks: BackgroundTasks) -> NotificationResponse:
-    background_tasks.add_task(process_open_tasks)
+    processor = TaskProcessor(_open_tasks_lock)
+    background_tasks.add_task(processor)
     return NotificationResponse(status="accepted", message="Processing started")
 
 
