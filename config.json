@@ -36,7 +36,7 @@
     "llm": {
       "provider": "mistralai",
       "model_name": "mistral-medium-3.5",
-      "api_key": "RQxf41PnOXCayDB2SdZY3UmzqOxIOxCk",
+      "api_key": "SECRET",
       "base_url": "https://api.mistral.ai/v1",
       "temperature": 0.1
     },
