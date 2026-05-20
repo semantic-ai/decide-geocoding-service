@@ -18,7 +18,6 @@ try:
 except ImportError:
     logging.getLogger("Segmentation").warning("LLMAnalyzer not found. LLMSegmentor will not utilize LLM capabilities.")
     LLMAnalyzer = None
-    raise
 
 
 #----------------------------------------------

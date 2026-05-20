@@ -41,6 +41,8 @@ class LLMAnalyzer:
         self._chat_model = init_chat_model(
             f"{provider}:{model_name}",
             **kwargs,
+            timeout=600,
+            max_retries=3
         )
 
     def analyze_single_entry_simple(
