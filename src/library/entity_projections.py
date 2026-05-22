@@ -1,15 +1,6 @@
 from typing import List, Dict, Union, Any
 from span_aligner import SpanProjector
 
-# Singleton instance
-_projector = None
-
-def _get_projector() -> SpanProjector:
-    """Lazy load the SpanProjector singleton."""
-    global _projector
-    if _projector is None:
-        _projector = SpanProjector()
-    return _projector
 
 def project_spans(
     src_text: str, 
@@ -41,7 +32,8 @@ def project_spans(
         })
 
     # Use the projector to project spans from source to target text
-    projected_spans = _get_projector().project_spans(src_text, tgt_text, formatted_spans, max_gap=max_gap)
+    projector = SpanProjector()
+    projected_spans = projector.project_spans(src_text, tgt_text, formatted_spans, max_gap=max_gap)
 
     formatted_projected_spans = []
     for span in projected_spans:
