@@ -8,6 +8,7 @@ future settings beyond NER.
 
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator, AnyHttpUrl, SecretStr, ConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from decide_ai_service_base.config import load_config
 
 
@@ -209,10 +210,14 @@ class SegmentationConfig(BaseModel):
     
 
 
-class AppConfig(BaseModel):
+class AppConfig(BaseSettings):
     """Root application configuration model."""
     
-    model_config = ConfigDict(extra="forbid")  # Reject extra fields not defined in the model
+    model_config = SettingsConfigDict(
+        extra="forbid", # Reject extra fields not defined in the model
+        env_nested_delimiter="__",  # allows SEGMENTATION__LLM__API_KEY etc.
+        env_ignore_empty=True,      # treat empty string env vars as unset
+    )
     
     app: AppSettingsConfig = Field(
         default_factory=AppSettingsConfig,

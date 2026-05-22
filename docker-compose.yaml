@@ -16,6 +16,11 @@ services:
     networks:
       - app-decide_default
     environment:
+      SEGMENTATION__LLM__API_KEY: "SECRET" # API key for the segmentation LLM provider (OpenAI, Mistral...)
+      LLM__API_KEY: "SECRET" # API key for the entity extracting and model annotating provider (OpenAI, Mistral...)
+      TRANSLATION__ETRANSLATION__BEARER_TOKEN: "SECRET" # When translation provider is etranslation, this bearer token will be used for authentication
+      TRANSLATION__ETRANSLATION__PASSWORD: "SECRET" # When translation provider is etranslation and bearer token is not set or empty, this password (in combination with the username) will be used for authentication
+      MODE: "development"
       TARGET_GRAPH: http://mu.semte.ch/graphs/harvesting
       JOB_GRAPH: http://mu.semte.ch/graphs/harvesting
       DATA_CONTAINER_GRAPH: http://mu.semte.ch/graphs/harvesting

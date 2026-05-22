@@ -40,6 +40,23 @@ For eTranslation callback setup, see [fastapi_callback_setup.md](fastapi_callbac
 
 Main settings in `config.json`. The file is validated at startup via Pydantic — invalid values cause startup failure with a descriptive error.
 
+Secrets must be placed in environment variables. See also `docker-compose.yml`. Following variables can be set:
+```
+# translation
+# When translation provider is etranslation, this bearer token will be used for authentication
+TRANSLATION__ETRANSLATION__BEARER_TOKEN: "SECRET" 
+# When translation provider is etranslation and bearer token is not set or empty, this password (in combination with the username) will be used for authentication
+TRANSLATION__ETRANSLATION__PASSWORD: "SECRET" 
+
+# llm
+# API key for the entity extracting and model annotating provider (OpenAI, Mistral...)
+LLM__API_KEY: "SECRET" 
+
+# segmentation
+# API key for the segmentation LLM provider (OpenAI, Mistral...)
+SEGMENTATION__LLM__API_KEY: "SECRET" 
+```
+
 ---
 
 ### `app`
