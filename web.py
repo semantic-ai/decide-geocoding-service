@@ -22,7 +22,7 @@ async def startup_event():
     wait_for_triplestore()
     fail_busy_and_scheduled_tasks()
     register_airo()
-    process_open_tasks()
+    process_open_tasks(_open_tasks_lock)
 
 
 
