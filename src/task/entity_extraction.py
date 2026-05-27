@@ -135,7 +135,7 @@ class EntityExtractionTask(DecisionTask):
               # Find expressions that realize the work
               GRAPH ?g {
                 ?en_expr a eli:Expression ;
-                  eli:realizes $work .
+                  eli:realizes | ^eli:is_realized_by $work .
               }
               # And have English language annotation
               GRAPH $graph {
