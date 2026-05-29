@@ -76,7 +76,7 @@ def resolve_work_uri_for_expression(expression_uri: str) -> Optional[str]:
         + """
         SELECT ?work WHERE {
           GRAPH ?g {
-            $expr eli:realizes ?work .
+            $expr eli:realizes | ^eli:is_realized_by ?work .
           }
         }
         LIMIT 1
