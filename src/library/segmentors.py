@@ -1,4 +1,3 @@
-import logging
 import re
 import asyncio
 from abc import ABC, abstractmethod
@@ -16,7 +15,7 @@ except ImportError:
 try:
     from .LLMAnalyzer import LLMAnalyzer
 except ImportError:
-    logging.getLogger("Segmentation").warning("LLMAnalyzer not found. LLMSegmentor will not utilize LLM capabilities.")
+    logger.warning("LLMAnalyzer not found. LLMSegmentor will not utilize LLM capabilities.")
     LLMAnalyzer = None
 
 
