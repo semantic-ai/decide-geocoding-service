@@ -29,6 +29,6 @@ pydantic==2.12.5
 sparqlwrapper==2.0.0
 translatepy==2.3
 span-aligner==0.3.2
-https://github.com/semantic-ai/decide-ai-service-base/releases/download/0.1.10/decide_ai_service_base-0.1.10-py3-none-any.whl
+https://github.com/semantic-ai/decide-ai-service-base/releases/download/0.1.11/decide_ai_service_base-0.1.11-py3-none-any.whl
 debugpy==1.8.20
 json-repair==0.59.10
