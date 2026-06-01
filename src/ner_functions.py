@@ -4,8 +4,7 @@ Simplified NER Functions Interface
 This module provides a clean, simple interface to the refactored NER system.
 It maintains backward compatibility while using the improved architecture.
 """
-
-import logging
+from helpers import logger
 from typing import List, Dict, Any, Optional
 from functools import cache
 
@@ -21,8 +20,6 @@ from .ner_extractors import (
     CompositeExtractor,
     EntityRefiner
 )
-
-logger = logging.getLogger(__name__)
 
 
 def get_composite_extractor(language: str) -> CompositeExtractor:

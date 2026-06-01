@@ -2,7 +2,6 @@
 
 import re
 import time
-import logging
 import requests
 import threading
 from typing import Dict, Tuple
@@ -11,6 +10,7 @@ from requests.auth import HTTPBasicAuth
 from translatepy.language import Language
 from translatepy.translators.base import BaseTranslator
 from translatepy.models import TranslationResult
+from helpers import logger
 
 from .config import get_config
 
@@ -28,7 +28,7 @@ class ETRanslationService(BaseTranslator):
         if BaseTranslator != object:
             super().__init__(**kwargs)
 
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger = logger
         app_config = get_config()
         self.config = app_config.translation.etranslation
         

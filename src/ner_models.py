@@ -4,16 +4,15 @@ NER Model Management
 This module handles loading and caching of NER models with lazy initialization.
 """
 
-import logging
 import spacy
 import torch
+from helpers import logger
 from typing import Dict, Any
 from transformers import pipeline
 from .ner_config import NER_MODELS
 from flair.models import SequenceTagger
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-logger = logging.getLogger(__name__)
 
 
 class ModelManager:

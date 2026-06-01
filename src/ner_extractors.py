@@ -9,7 +9,7 @@ Classes:
 - SpacyExtractor, FlairExtractor, etc.: Factory pattern implementations
 """
 import re
-import logging
+from helpers import logger
 from flair.data import Sentence
 from typing import List, Dict, Any
 from .ner_models import model_manager
@@ -308,7 +308,7 @@ class CompositeExtractor(BaseExtractor):
                 all_entities.extend(entities)
                 successes += 1
             except Exception as e:
-                logging.exception(f"Error in extractor {extractor_name}")
+                logger.exception(f"Error in extractor {extractor_name}")
                 errors.append(f"{extractor_name}: {type(e).__name__}: {e}")
 
         fail_if_no_successes(
@@ -363,7 +363,7 @@ class EntityRefiner:
     def __init__(self):
         self.model = None
         self.tokenizer = None
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger
     
     def _load_model(self):
         """Lazy load the refinement model."""

@@ -6,7 +6,6 @@ Supports any LangChain-compatible provider (ollama, openai, mistral, …)
 by setting config.translation.langchain.provider in config.json.
 """
 
-import logging
 import re
 from typing import Dict
 
@@ -16,6 +15,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from translatepy.language import Language
 from translatepy.models import TranslationResult
 from translatepy.translators.base import BaseTranslator
+from helpers import logger
 
 from .config import get_config
 
@@ -51,7 +51,7 @@ class LangChainTranslateService(BaseTranslator):
         if BaseTranslator != object:
             super().__init__(**kwargs)
 
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger = logger
         self.config = get_config().translation.langchain
 
         model_kwargs = {"temperature": self.config.temperature}

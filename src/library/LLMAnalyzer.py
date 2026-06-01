@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
@@ -7,8 +6,7 @@ from pydantic import BaseModel
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage
 import json_repair
-
-logger = logging.getLogger(__name__)
+from helpers import logger
 
 
 class LLMAnalyzer:
