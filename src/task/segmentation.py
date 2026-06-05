@@ -140,6 +140,8 @@ class SegmentationTask(DecisionTask):
                 base_url=seg_config.llm.base_url,
                 temperature=seg_config.llm.temperature,
                 max_new_tokens=seg_config.max_new_tokens,
+                max_retries=seg_config.llm.max_retries,
+                retry_delay=seg_config.llm.retry_delay,
             )
 
     def create_segment_annotations(self, source_uri: str, segments: list[dict[str, Any]]) -> list[str]:

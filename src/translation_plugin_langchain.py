@@ -18,6 +18,7 @@ from translatepy.models import TranslationResult
 from translatepy.translators.base import BaseTranslator
 
 from .config import get_config
+from .retry import retry_call
 
 
 LANGUAGE_NAMES: Dict[str, str] = {
@@ -66,6 +67,7 @@ class LangChainTranslateService(BaseTranslator):
         self._chat_model = init_chat_model(
             f"{self.config.provider}:{self.config.model_name}",
             **model_kwargs,
+            max_retries=0,
         )
 
         self.logger.info(
@@ -137,7 +139,7 @@ class LangChainTranslateService(BaseTranslator):
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(content=self._build_user_message(text, source_language, destination_language)),
         ]
-        response = self._chat_model.invoke(messages)
+        response = retry_call(self._chat_model.invoke, messages,max_retries=self.config.max_retries, retry_delay=self.config.retry_delay)
         translated = response.content.strip()
         if not translated:
             raise RuntimeError("LangChain translation returned an empty response")

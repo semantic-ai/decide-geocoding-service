@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage
+from ..retry import retry_call
 import json_repair
 
 
@@ -23,9 +24,13 @@ class LLMAnalyzer:
         base_url: Optional[str] = None,
         temperature: float = 0.0,
         json_mode: bool = True,
+        max_retries: int = 3,
+        retry_delay: float = 15.0,
     ):
         self.model_name = model_name
         self._provider = provider
+        self._max_retries = max_retries
+        self._retry_delay = retry_delay
 
         kwargs: Dict[str, Any] = {"temperature": temperature}
         if api_key:
@@ -42,7 +47,7 @@ class LLMAnalyzer:
             f"{provider}:{model_name}",
             **kwargs,
             timeout=600,
-            max_retries=3
+            max_retries=0,
         )
 
     def analyze_single_entry_simple(
@@ -67,7 +72,7 @@ class LLMAnalyzer:
             HumanMessage(content=user_prompt),
         ]
 
-        response = llm.invoke(messages)
+        response = retry_call(llm.invoke, messages,max_retries=self._max_retries, retry_delay=self._retry_delay)
 
         if response["parsing_error"]:
             raise ValueError(
@@ -94,7 +99,7 @@ class LLMAnalyzer:
         ]
 
         try:
-            response = self._chat_model.invoke(messages)
+            response = retry_call(self._chat_model.invoke, messages,max_retries=self._max_retries, retry_delay=self._retry_delay)
             result = self._parse_json(response.content)
             return self._validate_result(result, expected_schema)
 
