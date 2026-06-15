@@ -13,6 +13,7 @@ from decide_ai_service_base.annotation import RelationExtractionAnnotation
 from ..ner_functions import extract_entities
 from ..config import get_config
 from ..entity_mappers import map_entity_to_annotations, resolve_work_uri_for_expression
+from ..helper_functions import fail_if_no_successes
 from ..library.entity_projections import project_spans
 
 
@@ -58,9 +59,14 @@ class EntityExtractionTask(DecisionTask):
         Returns:
             list[str]: List of URIs of the created annotation resources for applicable entities.
         """
-        print(f"[GENERAL ENTITIES] subject: {self.source}; source_uri: {source_uri}")
+        logger.info(
+            f"Creating general entity annotations for source_uri={source_uri} "
+            f"(task source={self.source})"
+        )
 
         created_annotation_uris: list[str] = []
+        errors: list[str] = []
+        successes = 0
 
         # Resolve the work URI for this expression once (may be None if unknown)
         work_uri = resolve_work_uri_for_expression(source_uri)
@@ -74,12 +80,24 @@ class EntityExtractionTask(DecisionTask):
                     entity=entity,
                 )
                 created_annotation_uris.extend(annotation_uris)
+                successes += 1
             except Exception as e:
                 logger.error(
                     f"Failed to map entity '{entity.get('text')}' "
                     f"({entity.get('label')}) for source {source_uri}: {e}",
                     exc_info=True,
                 )
+                errors.append(
+                    f"{entity.get('text')!r} ({entity.get('label')}): "
+                    f"{type(e).__name__}: {e}"
+                )
+
+        fail_if_no_successes(
+            label=f"Entity mapping for {source_uri}",
+            total=len(entities),
+            successes=successes,
+            errors=errors,
+        )
 
         return created_annotation_uris
 
@@ -297,9 +315,11 @@ class EntityExtractionTask(DecisionTask):
         Assumes TranslationTask has already run and created the English expression.
         """
         eli_expressions = self.fetch_eli_expressions()
+        expression_uris = eli_expressions["expression_uris"]
+        skipped_empty = 0
 
-        for i in range(len(eli_expressions["expression_uris"])):
-            target_expression_uri = eli_expressions["expression_uris"][i]
+        for i in range(len(expression_uris)):
+            target_expression_uri = expression_uris[i]
             target_english_text = eli_expressions["expression_contents"][i]
 
             logger.info(
@@ -307,7 +327,9 @@ class EntityExtractionTask(DecisionTask):
 
             if not target_english_text or not target_english_text.strip():
                 logger.warning(
-                    "No content available for entity extraction")
+                    f"No content available for entity extraction on {target_expression_uri}"
+                )
+                skipped_empty += 1
                 continue
 
             # Extract general entities (DATE, etc.) on the English text
@@ -333,3 +355,10 @@ class EntityExtractionTask(DecisionTask):
             for projected_entity_uri in entity_uris_projected:
                 self.results_container_uris.append(
                     self.create_output_container(projected_entity_uri))
+
+        if expression_uris and skipped_empty == len(expression_uris):
+            raise RuntimeError(
+                f"Entity extraction task {self.task_uri}: "
+                f"all {len(expression_uris)} input expressions had empty content, "
+                f"nothing was processed"
+            )

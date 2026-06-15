@@ -117,9 +117,10 @@ class TranslationTask(DecisionTask):
                 f"Detected language from content: {detected_lang}")
             return detected_lang
         except Exception as e:
-            logger.error(
-                f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
-            return "nl"  # Default to Dutch for Belgian documents
+            raise RuntimeError(
+                f"Language detection failed for {self.source} "
+                f"(content length={len(content)}): {e}"
+            ) from e
 
     def create_language_relation(self, source_uri: str, language: str):
         """
@@ -355,19 +356,20 @@ class TranslationTask(DecisionTask):
             if not source_language or source_language.lower() == "auto":
                 logger.warning(
                     "Source language was 'auto' or missing, detecting from content...")
+                # Limit text length for language detection to avoid hanging on very long text
+                text_for_detection = original_text[:1000] if len(
+                    original_text) > 1000 else original_text
+                logger.debug(
+                    f"Using {len(text_for_detection)} chars (of {len(original_text)}) for language detection")
                 try:
-                    # Limit text length for language detection to avoid hanging on very long text
-                    text_for_detection = original_text[:1000] if len(
-                        original_text) > 1000 else original_text
-                    logger.debug(
-                        f"Using {len(text_for_detection)} chars (of {len(original_text)}) for language detection")
                     source_language = langdetect.detect(text_for_detection)
-                    logger.info(
-                        f"Detected source language: {source_language}")
                 except Exception as e:
-                    logger.error(
-                        f"Language detection failed: {e}. Defaulting to 'nl' (Dutch).")
-                    source_language = "nl"  # Default to Dutch for Belgian documents
+                    raise RuntimeError(
+                        f"Language detection failed for {source_expression_uri} "
+                        f"(content length={len(original_text)}): {e}"
+                    ) from e
+                logger.info(
+                    f"Detected source language: {source_language}")
 
             # Skip translation if already in target language
             if source_language.lower() == self.target_language.lower():
@@ -382,11 +384,17 @@ class TranslationTask(DecisionTask):
                 f"Translating from {source_language} to {self.target_language}")
 
             # Use translatepy's translate method
-            translation_result = translator.translate(
-                original_text,
-                destination_language=self.target_language,
-                source_language=source_language
-            )
+            try:
+                translation_result = translator.translate(
+                    original_text,
+                    destination_language=self.target_language,
+                    source_language=source_language
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    f"Translation failed for {source_expression_uri} "
+                    f"({source_language} -> {self.target_language}): {e}"
+                ) from e
 
             # Extract the translated text from the result
             translated_text = translation_result.result

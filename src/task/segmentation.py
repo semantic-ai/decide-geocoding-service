@@ -272,16 +272,21 @@ class SegmentationTask(DecisionTask):
         run the segmentor, and save annotations on the English expression.
         """
         eli_expressions = self.fetch_eli_expressions()
+        expression_uris = eli_expressions["expression_uris"]
+        skipped_empty = 0
 
-        for i in range(len(eli_expressions["expression_uris"])):
-            target_expression_uri = eli_expressions["expression_uris"][i]
+        for i in range(len(expression_uris)):
+            target_expression_uri = expression_uris[i]
             target_english_text = eli_expressions["expression_contents"][i]
 
             logger.info(
                 f"Processing segmentation for {target_expression_uri}")
 
             if not target_english_text or not target_english_text.strip():
-                logger.warning("No content available for segmentation")
+                logger.warning(
+                    f"No content available for segmentation on {target_expression_uri}"
+                )
+                skipped_empty += 1
                 continue
 
             # Segment English text
@@ -326,3 +331,10 @@ class SegmentationTask(DecisionTask):
                 self.results_container_uris.append(
                     self.create_output_container(projected_segment_uri)
                 )
+
+        if expression_uris and skipped_empty == len(expression_uris):
+            raise RuntimeError(
+                f"Segmentation task {self.task_uri}: "
+                f"all {len(expression_uris)} input expressions had empty content, "
+                f"nothing was processed"
+            )

@@ -9,12 +9,13 @@ Classes:
 - SpacyExtractor, FlairExtractor, etc.: Factory pattern implementations
 """
 import re
-import logging
+from helpers import logger
 from flair.data import Sentence
 from typing import List, Dict, Any
 from .ner_models import model_manager
 from .ner_config import REGEX_PATTERNS, NER_MODELS, LABEL_MAPPINGS
 from .config import get_config
+from .helper_functions import fail_if_no_successes
 import torch
 
 
@@ -134,31 +135,30 @@ class SpacyExtractor(BaseExtractor):
         super().__init__(language, extractor_type='spacy')
     
     def extract(self, text: str) -> List[Dict[str, Any]]:
-        """Extract entities using spaCy NER."""
-        try:
-            nlp = model_manager.get_spacy_model(self.language)
-            
-            if nlp is None:
-                logging.warning(f"spaCy model not available for language '{self.language}'")
-                return []
-            
-            doc = nlp(text)
-            
-            entities = []
-            for ent in doc.ents:
-                entities.append({
-                    'text': ent.text,
-                    'label': ent.label_,
-                    'start': ent.start_char,
-                    'end': ent.end_char,
-                    'confidence': 0.7  # spaCy doesn't provide confidence scores for NER
-                })
-            
-            return self.post_process_entities(entities)
-            
-        except Exception as e:
-            logging.warning(f"Error in spaCy extraction ({self.language}): {e}")
-            return []
+        """Extract entities using spaCy NER.
+
+        Raises:
+            ValueError / RuntimeError: Propagated from ``ModelManager.get_spacy_model``
+                when the spaCy model is not configured or fails to load.
+            Exception: Any error from ``nlp(text)`` is propagated so the caller
+                (typically ``CompositeExtractor``) can decide whether the failure
+                is fatal.
+        """
+        nlp = model_manager.get_spacy_model(self.language)
+
+        doc = nlp(text)
+
+        entities = []
+        for ent in doc.ents:
+            entities.append({
+                'text': ent.text,
+                'label': ent.label_,
+                'start': ent.start_char,
+                'end': ent.end_char,
+                'confidence': 0.7  # spaCy doesn't provide confidence scores for NER
+            })
+
+        return self.post_process_entities(entities)
 
 
 class HuggingFaceExtractor(BaseExtractor):
@@ -168,31 +168,28 @@ class HuggingFaceExtractor(BaseExtractor):
         super().__init__(language, extractor_type='huggingface')
     
     def extract(self, text: str) -> List[Dict[str, Any]]:
-        """Extract entities using Hugging Face NER pipeline."""
-        try:
-            ner_pipeline = model_manager.get_huggingface_model(self.language)
-            
-            if ner_pipeline is None:
-                logging.warning(f"HuggingFace model not available for language '{self.language}'")
-                return []
-            
-            results = ner_pipeline(text)
-            
-            entities = []
-            for result in results:
-                entities.append({
-                    'text': result['word'],
-                    'label': result['entity_group'],
-                    'start': result['start'],
-                    'end': result['end'],
-                    'confidence': result.get('score', 1.0)
-                })
-            
-            return self.post_process_entities(entities)
-            
-        except Exception as e:
-            logging.warning(f"Error in HuggingFace extraction ({self.language}): {e}")
-            return []
+        """Extract entities using Hugging Face NER pipeline.
+
+        Raises:
+            ValueError / RuntimeError: Propagated from ``ModelManager.get_huggingface_model``
+                when the model is not configured or fails to load.
+            Exception: Inference errors are propagated to the caller.
+        """
+        ner_pipeline = model_manager.get_huggingface_model(self.language)
+
+        results = ner_pipeline(text)
+
+        entities = []
+        for result in results:
+            entities.append({
+                'text': result['word'],
+                'label': result['entity_group'],
+                'start': result['start'],
+                'end': result['end'],
+                'confidence': result.get('score', 1.0)
+            })
+
+        return self.post_process_entities(entities)
 
 
 class FlairExtractor(BaseExtractor):
@@ -203,39 +200,35 @@ class FlairExtractor(BaseExtractor):
         self.model_name = model_name  # Optional override, otherwise uses language from config
     
     def extract(self, text: str) -> List[Dict[str, Any]]:
-        """Extract entities using Flair NER."""
-        try:
-            # Load the Flair SequenceTagger model using language from config or explicit model_name
-            tagger = model_manager.get_flair_model(language=self.language, model_name=self.model_name)
-            
-            if tagger is None:
-                logging.warning(f"Flair model not available for language '{self.language}'")
-                return []
-            
-            # Create sentence (don't use tokenizer for legal texts as recommended)
-            sentence = Sentence(text, use_tokenizer=False)
-            
-            # Predict NER tags using the SequenceTagger
-            tagger.predict(sentence)
-            
-            entities = []
-            # Iterate over entities and extract information
-            for entity in sentence.get_spans('ner'):
-                label_obj = entity.get_label('ner')
-                entities.append({
-                    'text': entity.text,
-                    'label': label_obj.value,
-                    'start': entity.start_position,
-                    'end': entity.end_position,
-                    'confidence': label_obj.score
-                })
-            
-            return self.post_process_entities(entities)
-            
-        except Exception as e:
-            model_info = self.model_name or f"config({self.language})"
-            logging.warning(f"Error in Flair extraction ({model_info}): {e}")
-            return []
+        """Extract entities using Flair NER.
+
+        Raises:
+            ValueError / RuntimeError: Propagated from ``ModelManager.get_flair_model``
+                when the model is not configured or fails to load.
+            Exception: Prediction errors are propagated to the caller.
+        """
+        # Load the Flair SequenceTagger model using language from config or explicit model_name
+        tagger = model_manager.get_flair_model(language=self.language, model_name=self.model_name)
+
+        # Create sentence (don't use tokenizer for legal texts as recommended)
+        sentence = Sentence(text, use_tokenizer=False)
+
+        # Predict NER tags using the SequenceTagger
+        tagger.predict(sentence)
+
+        entities = []
+        # Iterate over entities and extract information
+        for entity in sentence.get_spans('ner'):
+            label_obj = entity.get_label('ner')
+            entities.append({
+                'text': entity.text,
+                'label': label_obj.value,
+                'start': entity.start_position,
+                'end': entity.end_position,
+                'confidence': label_obj.score
+            })
+
+        return self.post_process_entities(entities)
 
 
 class RegexExtractor(BaseExtractor):
@@ -297,17 +290,34 @@ class CompositeExtractor(BaseExtractor):
         self.extractors = extractors
     
     def extract(self, text: str) -> List[Dict[str, Any]]:
-        """Extract entities using all configured extractors."""
+        """Extract entities using all configured extractors.
+
+        Individual sub-extractor failures are tolerated (other extractors
+        may still produce results), but if *every* sub-extractor raises
+        the composite raises ``RuntimeError`` so the surrounding task is
+        marked as failed.
+        """
         all_entities = []
-        
+        errors: List[str] = []
+        successes = 0
+
         for extractor in self.extractors:
+            extractor_name = type(extractor).__name__
             try:
                 entities = extractor.extract(text)
                 all_entities.extend(entities)
+                successes += 1
             except Exception as e:
-                logging.warning(f"Error in extractor {type(extractor).__name__}: {e}")
-                continue
-        
+                logger.exception(f"Error in extractor {extractor_name}")
+                errors.append(f"{extractor_name}: {type(e).__name__}: {e}")
+
+        fail_if_no_successes(
+            label=f"CompositeExtractor({self.language or 'unknown'})",
+            total=len(self.extractors),
+            successes=successes,
+            errors=errors,
+        )
+
         return self.post_process_entities(all_entities)
 
 
@@ -353,7 +363,7 @@ class EntityRefiner:
     def __init__(self):
         self.model = None
         self.tokenizer = None
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger
     
     def _load_model(self):
         """Lazy load the refinement model."""
@@ -371,25 +381,31 @@ class EntityRefiner:
         Returns:
             List of entities with refined labels. Non-refinable entities are passed through unchanged.
             Refined entities have 'original_label' field preserving the generic label.
+
+        Raises:
+            RuntimeError: Propagated from ``ModelManager.get_refinement_model`` if
+                the refinement model cannot be loaded. Also raised if every
+                refinable entity in ``entities`` fails during refinement (the
+                surrounding task is then marked as failed by ``Task.run``).
         """
         self._load_model()
-        
-        if self.model is None or self.tokenizer is None:
-            self.logger.warning("Refinement model not available, returning entities unchanged")
-            return entities
-        
+
         refinement_config = NER_MODELS.get('refinement', {})
         refinable_labels = set(refinement_config.get('refinable_labels', []))
         label_classes = refinement_config.get('label_classes', [])
         max_length = refinement_config.get('max_length', 2048)
         
         refined_entities = []
+        attempted = 0
+        successes = 0
+        errors: List[str] = []
         for entity in entities:
             # Only refine entities with refinable labels
             if entity['label'] not in refinable_labels:
                 refined_entities.append(entity)
                 continue
-            
+
+            attempted += 1
             try:
                 # Mark entity in context with [E] ... [/E] markers as per model documentation
                 entity_text = entity['text']
@@ -430,11 +446,19 @@ class EntityRefiner:
                 else:
                     # If prediction is out of range, keep original
                     refined_entities.append(entity)
-                    
+                successes += 1
             except Exception as e:
-                self.logger.warning(f"Error refining entity '{entity['text']}': {e}")
+                self.logger.exception(f"Error refining entity '{entity['text']}'")
+                errors.append(f"{entity.get('text')!r}: {type(e).__name__}: {e}")
                 refined_entities.append(entity)
-        
+
+        fail_if_no_successes(
+            label="EntityRefiner.refine",
+            total=attempted,
+            successes=successes,
+            errors=errors,
+        )
+
         return refined_entities
 
 

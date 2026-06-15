@@ -4,12 +4,12 @@ Uses Helsinki-NLP OPUS-MT models for high-quality translation.
 """
 
 import re
-import logging
 from transformers import MarianMTModel, MarianTokenizer
 
 from translatepy.translators.base import BaseTranslator
 from translatepy.models import TranslationResult
 from translatepy.language import Language
+from helpers import logger
 
 
 # Helsinki-NLP model mapping: (source_lang, target_lang) -> model_name
@@ -26,7 +26,7 @@ class HuggingFaceTranslateService(BaseTranslator):
         if BaseTranslator != object:
             super().__init__(**kwargs)
         
-        self.logger = logging.getLogger(self.__class__.__name__)
+        self.logger = logger
         self._models = {}  # Cache: (src, tgt) -> (model, tokenizer)
     
     def _get_lang_code(self, language):

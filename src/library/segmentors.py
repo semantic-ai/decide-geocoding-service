@@ -1,4 +1,3 @@
-import logging
 import re
 import asyncio
 from abc import ABC, abstractmethod
@@ -16,7 +15,7 @@ except ImportError:
 try:
     from .LLMAnalyzer import LLMAnalyzer
 except ImportError:
-    logging.getLogger("Segmentation").warning("LLMAnalyzer not found. LLMSegmentor will not utilize LLM capabilities.")
+    logger.warning("LLMAnalyzer not found. LLMSegmentor will not utilize LLM capabilities.")
     LLMAnalyzer = None
 
 
@@ -472,9 +471,9 @@ class LLMSegmentor(AbstractSegmentor):
 
     def segment(self, text: str) -> List[Dict[str, Any]]:
         logger.info(f"Running LLM segmentation with {self.analyzer.model_name}...")
-        
+
         try:
-             result = self.analyzer.analyze_single_entry(
+            result = self.analyzer.analyze_single_entry(
                 text=text,
                 system_prompt=self.SYSTEM_PROMPT_REFERENCES_SEGMENTATION,
                 user_prompt_template=self.USER_PROMPT_TEMPLATE_REFERENCES_SEGMENTATION,
@@ -482,8 +481,10 @@ class LLMSegmentor(AbstractSegmentor):
                 text_limit=28000,
             )
         except Exception as e:
-            logger.error(f"LLM segmentation failed: {e}")
-            return []
+            logger.exception("LLM segmentation failed")
+            raise RuntimeError(
+                f"LLM segmentation failed ({self.analyzer.model_name}): {e}"
+            ) from e
 
         tagged_text = result.get("tagged_text", "")
         if not tagged_text:
