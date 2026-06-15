@@ -135,6 +135,16 @@ class LangChainTranslationConfig(BaseModel):
         ge=200,
         description="Maximum characters per translation chunk"
     )
+    max_retries: int = Field(
+        default=3,
+        ge=1,
+        description="Max attempts on LLM call failure"
+    )
+    retry_delay: float = Field(
+        default=15.0,
+        ge=0,
+        description="Seconds to sleep between retries"
+    )
 
 
 class TranslationConfig(BaseModel):
@@ -188,6 +198,16 @@ class LlmConfig(BaseModel):
         ge=0.0,
         le=2.0,
         description="Generation temperature (lower = more deterministic)"
+    )
+    max_retries: int = Field(
+        default=3,
+        ge=1,
+        description="Max attempts on LLM call failure"
+    )
+    retry_delay: float = Field(
+        default=15.0,
+        ge=0,
+        description="Seconds to sleep between retries"
     )
 
 

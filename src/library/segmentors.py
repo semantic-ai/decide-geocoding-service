@@ -446,7 +446,7 @@ class LLMSegmentor(AbstractSegmentor):
         }
 
 
-    def __init__(self, api_key: str = None, base_url: str = None, model_name: str = "mistral-nemo", temperature: float = 0.0, max_new_tokens: int = 14000, provider: str = "ollama"):
+    def __init__(self, api_key: str = None, base_url: str = None, model_name: str = "mistral-nemo", temperature: float = 0.0, max_new_tokens: int = 14000, provider: str = "ollama", max_retries: int = 3, retry_delay: float = 15.0):
         super().__init__(api_key, base_url, model_name, temperature, max_new_tokens)
         if LLMAnalyzer is None:
              raise ImportError("LLMAnalyzer class is not available.")
@@ -457,6 +457,8 @@ class LLMSegmentor(AbstractSegmentor):
             api_key=self.api_key,
             base_url=self.base_url,
             temperature=self.temperature,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
         )
 
     def format_segment(self, segment: Dict[str, Any]) -> Dict[str, Any]:
