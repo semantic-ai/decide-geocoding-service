@@ -225,7 +225,7 @@ def map_entity_to_annotations(task, work_uri: Optional[str], expression_uri: str
 
     # Publication / legal / context dates on the work.
     if label == "PUBLICATION_DATE":
-        created += _create_work_date_annotation(task, work_uri, expression_uri, entity, "eli:publication_date")
+        created += _create_work_date_annotation(task, work_uri, expression_uri, entity, "eli:date_publication")
         return created
 
     if label == "LEGAL_DATE":
