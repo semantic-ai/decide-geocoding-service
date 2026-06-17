@@ -35,8 +35,8 @@ class LLMAnalyzer:
         if json_mode:
             if provider == "ollama":
                 kwargs["format"] = "json"
-            #elif provider in {"mistralai", "mistral"}:
-            #    kwargs["response_format"] = {"type": "json_object"}
+            elif provider in {"mistralai", "mistral"}:
+                kwargs["response_format"] = {"type": "json_object"}
 
         self._chat_model = init_chat_model(
             f"{provider}:{model_name}",
@@ -136,7 +136,7 @@ class LLMAnalyzer:
 
             # 2b. Repair fenced JSON
             try:
-                repaired = json_repair.loads(bad_json)
+                repaired = json_repair.loads(fenced_text)
                 if isinstance(repaired, dict):
                     return repaired
             except Exception:
@@ -168,7 +168,7 @@ class LLMAnalyzer:
 
             # 4b. Repair extracted JSON block
             try:
-                repaired = repair_json(json_block, return_objects=True)
+                repaired = json_repair.loads(json_block)
                 if isinstance(repaired, dict):
                     return repaired
             except Exception:
@@ -176,7 +176,7 @@ class LLMAnalyzer:
 
         # 5. Last resort: repair entire response
         try:
-            repaired = repair_json(text, return_objects=True)
+            repaired = json_repair.loads(text)
             if isinstance(repaired, dict):
                 return repaired
         except Exception:
