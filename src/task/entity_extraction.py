@@ -15,6 +15,10 @@ from ..config import get_config
 from ..entity_mappers import map_entity_to_annotations, resolve_work_uri_for_expression
 from ..helper_functions import fail_if_no_successes
 from ..library.entity_projections import project_spans
+from ..library.entity_formatter import EntityFormatter
+
+# Instantiate a single EntityFormatter to reuse across tasks.
+entity_formatter = EntityFormatter()
 
 
 class EntityExtractionTask(DecisionTask):
@@ -335,8 +339,12 @@ class EntityExtractionTask(DecisionTask):
             # Extract general entities (DATE, etc.) on the English text
             general_entities = self.extract_general_entities(
                 target_english_text, language="en")
+
+            # Format entities: parse dates/periods and split locations into individual entities.
+            general_entities_formatted = entity_formatter.format(general_entities)
+
             entity_uris = self.create_general_entity_annotations(
-                target_expression_uri, general_entities)
+                target_expression_uri, general_entities_formatted)
 
             for entity_uri in entity_uris:
                 self.results_container_uris.append(
@@ -351,7 +359,12 @@ class EntityExtractionTask(DecisionTask):
                 continue
 
             general_entities_projected = project_spans(target_english_text,source_text,general_entities)
-            entity_uris_projected = self.create_general_entity_annotations(source_expression_uri, general_entities_projected)
+
+
+            # Format the projected entities as well.
+            general_entities_projected_formatted = entity_formatter.format(general_entities_projected)
+
+            entity_uris_projected = self.create_general_entity_annotations(source_expression_uri, general_entities_projected_formatted)
             for projected_entity_uri in entity_uris_projected:
                 self.results_container_uris.append(
                     self.create_output_container(projected_entity_uri))
