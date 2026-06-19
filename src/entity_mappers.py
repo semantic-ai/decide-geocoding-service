@@ -6,9 +6,11 @@ from typing import Any, Dict, List, Optional
 from helpers import update, query
 from escape_helpers import sparql_escape_uri, sparql_escape_string, sparql_escape_date
 
-from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, AI_COMPONENTS, AGENT_TYPES, SPARQL_PREFIXES
+from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, AGENT_TYPES, SPARQL_PREFIXES
 from decide_ai_service_base.annotation import RelationExtractionAnnotation
-
+from decide_ai_service_base.util import (
+    get_agent_uri
+)
 
 def _parse_date_literal(text: str) -> str:
     """Convert a date string into a typed xsd:date literal.
@@ -117,7 +119,7 @@ def _annotate(task,subject: str, predicate: str, obj: str, source_uri: str, enti
         source_uri=source_uri,
         start=entity.get("start"),
         end=entity.get("end"),
-        agent=AI_COMPONENTS["ner_extractor"],
+        agent=get_agent_uri("ner_extractor"),
         agent_type=AGENT_TYPES["ai_component"],
         confidence=entity.get("confidence", 1.0),
     ).add_to_triplestore_if_not_exists()
