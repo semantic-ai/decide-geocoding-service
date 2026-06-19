@@ -6,7 +6,10 @@ from string import Template
 from escape_helpers import sparql_escape_uri, sparql_escape_string
 
 from decide_ai_service_base.task import DecisionTask
-from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, TASK_OPERATIONS, AI_COMPONENTS, AGENT_TYPES, LANGUAGE_CODE_TO_URI, LANGUAGE_URI_TO_CODE
+from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, TASK_OPERATIONS, AGENT_TYPES, LANGUAGE_CODE_TO_URI
+from decide_ai_service_base.util import (
+    get_agent_uri
+)
 from decide_ai_service_base.annotation import RelationExtractionAnnotation
 
 from ..config import get_config
@@ -175,7 +178,7 @@ class SegmentationTask(DecisionTask):
                 source_uri=source_uri,
                 start=segment.get('start'),
                 end=segment.get('end'),
-                agent=AI_COMPONENTS["segmenter"],
+                agent=get_agent_uri("segmenter"),
                 agent_type=AGENT_TYPES["ai_component"],
                 confidence=1.0
             ).add_to_triplestore_if_not_exists()
