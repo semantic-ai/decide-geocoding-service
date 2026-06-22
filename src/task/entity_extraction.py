@@ -341,6 +341,7 @@ class EntityExtractionTask(DecisionTask):
                 target_english_text, language="en")
 
             # Format entities: parse dates/periods and split locations into individual entities.
+            # This adds structured 'formatted' fields to each entity.
             general_entities_formatted = entity_formatter.format(general_entities)
 
             entity_uris = self.create_general_entity_annotations(
@@ -351,20 +352,20 @@ class EntityExtractionTask(DecisionTask):
                     self.create_output_container(entity_uri))
 
             # Projection back to original/source expression
-            if not general_entities:
+            if not general_entities_formatted:
                 continue
 
             source_expression_uri, source_text = self.resolve_projection_context(target_expression_uri,translated_text=target_english_text)
             if not source_text or source_expression_uri == target_expression_uri:
                 continue
 
-            general_entities_projected = project_spans(target_english_text,source_text,general_entities)
+            # Project already-formatted entities onto source text.
+            general_entities_projected = project_spans(target_english_text, source_text, general_entities_formatted)
 
+            logger.info(f"[extraction]: {general_entities_formatted}")
+            logger.info(f"[projection]: {general_entities_projected}")
 
-            # Format the projected entities as well.
-            general_entities_projected_formatted = entity_formatter.format(general_entities_projected)
-
-            entity_uris_projected = self.create_general_entity_annotations(source_expression_uri, general_entities_projected_formatted)
+            entity_uris_projected = self.create_general_entity_annotations(source_expression_uri, general_entities_projected)
             for projected_entity_uri in entity_uris_projected:
                 self.results_container_uris.append(
                     self.create_output_container(projected_entity_uri))

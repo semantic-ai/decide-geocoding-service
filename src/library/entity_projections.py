@@ -24,12 +24,14 @@ def project_spans(
         # specific logic: prefer single 'label', fallback to 'labels' list
         labels = [span["label"]] if "label" in span else span.get("labels", [])
         
-        formatted_spans.append({
+        formatted_span = {**span}
+        formatted_span.update({
             "start": span["start"],
             "end": span["end"],
             "labels": labels,
             "text": src_text[span["start"]:span["end"]]
         })
+        formatted_spans.append(formatted_span)
 
     # Use the projector to project spans from source to target text
     projector = SpanProjector()
@@ -37,11 +39,15 @@ def project_spans(
 
     formatted_projected_spans = []
     for span in projected_spans:
-        formatted_projected_spans.append({
+        formatted_span = {**span}  # keep all projected fields
+
+        formatted_span.update({
             "start": span["start"],
             "end": span["end"],
             "label": span.get("labels", [None])[0] if span.get("labels", []) else None,
             "text": tgt_text[span["start"]:span["end"]]
         })
+
+        formatted_projected_spans.append(formatted_span)
 
     return formatted_projected_spans
