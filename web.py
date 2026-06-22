@@ -6,7 +6,8 @@ from helpers import logger
 from src.airo import register_airo
 from src.task import TranslationTask, SegmentationTask, EntityExtractionTask
 from src.translation_plugin_etranslation import _callback_storage, _callback_lock
-from decide_ai_service_base.util import fail_busy_and_scheduled_tasks, TaskProcessor, wait_for_triplestore, process_open_tasks
+from decide_ai_service_base.util import fail_busy_and_scheduled_tasks, TaskProcessor, wait_for_triplestore, process_open_tasks, write_agent_info
+
 from decide_ai_service_base.schema import NotificationResponse, TaskOperationsResponse
 from decide_ai_service_base.task import Task
 
@@ -20,6 +21,10 @@ _open_tasks_lock = Lock()
 async def startup_event():
     logger.info("Startup running in PID %s", os.getpid())
     wait_for_triplestore()
+    write_agent_info("http://lblod.data.gift/id/components/named-entity-recognition/v1.0.0", "ner_extractor")
+    write_agent_info("http://lblod.data.gift/id/components/named-entity-recognition/v1.0.0", "segmenter")
+    write_agent_info("http://lblod.data.gift/id/components/named-entity-recognition/v1.0.0", "translator")
+
     fail_busy_and_scheduled_tasks()
     register_airo()
     process_open_tasks(_open_tasks_lock)
