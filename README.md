@@ -136,6 +136,147 @@ Used by the `segmenting` task. Settings are split between top-level keys and the
 
 ---
 
+### LLM Configuration: Translation & Segmentation
+
+Both **translation** (via `langchain` provider) and **segmentation** delegate to an LLM backend. The system is designed to work with any LangChain-supported provider - local (Ollama) or remote (OpenAI, Mistral, etc.) - with no code changes required. Switch providers by updating `config.json`.
+
+#### Shared `llm` sub-keys
+
+| Key | Default | Effect                                                                                                         |
+|---|---|----------------------------------------------------------------------------------------------------------------|
+| `provider` | `ollama` | LangChain provider name: `ollama`, `openai`, `mistralai`, `anthropic`, …                                       |
+| `model_name` | varies | Model identifier as understood by the provider                                                                 |
+| `api_key` | `null` | API key - required for remote providers. **Never commit to config.json**; use the environment variable instead |
+| `base_url` | `null` | Custom endpoint - required for Ollama/self-hosted; optional for providers with a default endpoint              |
+| `temperature` | `0.0` / `0.1` | Generation temperature - lower = more deterministic                                                            |
+| `max_retries` | `3` | Retry attempts on LLM call failure                                                                             |
+| `retry_delay` | `15.0` | Seconds between retries                                                                                        |
+
+#### Translation (`translation.langchain`)
+
+Set `translation.provider` to `"langchain"` to enable LLM-based translation. Additional keys:
+
+| Key | Default | Effect |
+|---|---|---|
+| `max_text_length` | `6000` | Maximum characters per translation chunk |
+
+Add the `translation.langchain` block to `config.json`:
+
+```json
+"translation": {
+  "target_language": "en",
+  "provider": "langchain",
+  "langchain": {
+    "provider": "ollama",
+    "model_name": "mistral-nemo",
+    "base_url": "http://host.docker.internal:11434",
+    "temperature": 0.1,
+    "max_text_length": 6000
+  }
+}
+```
+
+**Example — Ollama (local):**
+```json
+"langchain": {
+  "provider": "ollama",
+  "model_name": "mistral-nemo",
+  "base_url": "http://host.docker.internal:11434",
+  "temperature": 0.1
+}
+```
+
+**Example — OpenAI:**
+```json
+"langchain": {
+  "provider": "openai",
+  "model_name": "gpt-4o-mini",
+  "temperature": 0.1
+}
+```
+
+**Example — Mistral AI:**
+```json
+"langchain": {
+  "provider": "mistralai",
+  "model_name": "mistral-small-latest",
+  "temperature": 0.1
+}
+```
+
+#### Segmentation (`segmentation.llm`)
+
+The segmentation task uses the LLM to tag document sections. The `segmentation.llm` block controls which model to use.
+
+**Example - Ollama (local):**
+```json
+"segmentation": {
+  "llm": {
+    "provider": "ollama",
+    "model_name": "mistral-nemo",
+    "base_url": "http://ollama:11434",
+    "temperature": 0.0
+  },
+  "max_new_tokens": 20000,
+  "max_gap": 5
+}
+```
+
+**Example - OpenAI:**
+```json
+"segmentation": {
+  "llm": {
+    "provider": "openai",
+    "model_name": "gpt-4.1",
+    "temperature": 0.0
+  },
+  "max_new_tokens": 20000,
+  "max_gap": 5
+}
+```
+
+**Example - Mistral AI:**
+```json
+"segmentation": {
+  "llm": {
+    "provider": "mistralai",
+    "model_name": "mistral-medium-3.5",
+    "base_url": "https://api.mistral.ai/v1",
+    "temperature": 0.1
+  },
+  "max_new_tokens": 20000,
+  "max_gap": 5
+}
+```
+
+**GemmaSegmentor (legacy specialized model):** Set `llm.model_name` to `"wdmuer/decide-marked-segmentation"` to use the built-in transformers-based segmentor instead of the generic LLM approach:
+
+```json
+"segmentation": {
+  "llm": {
+    "model_name": "wdmuer/decide-marked-segmentation"
+  },
+  "max_new_tokens": 4000,
+  "max_gap": 5
+}
+```
+
+#### API Keys via Environment Variables
+
+Never store API keys in `config.json`. Use environment variables with the nested delimiter `__`:
+
+```bash
+# Translation langchain API key
+TRANSLATION__LANGCHAIN__API_KEY="sk-..."
+
+# Segmentation LLM API key
+SEGMENTATION__LLM__API_KEY="sk-..."
+```
+
+See `docker-compose.yml` for the full list of supported variables.
+
+---
+
 ### `ml_training`
 Used by the `classifier-training` task only; not needed for normal inference.
 
@@ -183,51 +324,3 @@ Ensure the required Docker network exists (see `docker-compose.yaml`).
 Nominatim is included in docker-compose. First startup can take longer than usual to build the database (one-time setup, persisted via volume).
 
 
-## Segmentation
-
-The service supports two different segmentation models, configurable via `config.json`.
-
-### 1. LLMSegmentor (Generic LLM)
-Default. Works with any LangChain-supported provider (OpenAI, Ollama, Mistral, …). Instructs the model to return tagged JSON.
-
-**Example — Ollama (`config.json`):**
-```json
-"segmentation": {
-  "llm": {
-    "provider": "ollama",
-    "model_name": "mistral-nemo",
-    "base_url": "http://ollama:11434",
-    "temperature": 0.0
-  },
-  "max_new_tokens": 20000,
-  "max_gap": 5
-}
-```
-
-**Example — OpenAI:**
-```json
-"segmentation": {
-  "llm": {
-    "provider": "openai",
-    "model_name": "gpt-4.1",
-    "api_key": "YOUR_KEY",
-    "temperature": 0.0
-  },
-  "max_new_tokens": 20000,
-  "max_gap": 5
-}
-```
-
-### 2. GemmaSegmentor (Specialized Model)
-Uses the specialized `wdmuer/decide-marked-segmentation` model which outputs XML tags directly. Legacy behaviour.
-
-**To enable**, set `llm.model_name` to the exact model ID:
-```json
-"segmentation": {
-  "llm": {
-    "model_name": "wdmuer/decide-marked-segmentation"
-  },
-  "max_new_tokens": 4000,
-  "max_gap": 5
-}
-```
