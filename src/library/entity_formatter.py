@@ -1,5 +1,6 @@
-import uuid as _uuid_module
+import uuid as uuid
 from dateperiodparser import DatePeriodParser
+from escape_helpers import sparql_escape_uri
 from locationformatter import LocationFormatter
 
 _PERIOD_BASE_URI = "https://data.lblod.info/id/period"
@@ -57,7 +58,7 @@ class EntityFormatter:
 
     @staticmethod
     def _make_interval_obj(start_date: str, end_date: str) -> dict:
-        uid = str(_uuid_module.uuid4())
+        uid = str(uuid.uuid4())
         return {
             "type":         "time:ProperInterval",
             "uuid":         uid,
@@ -70,7 +71,7 @@ class EntityFormatter:
     def _object_formatted_text(obj: dict) -> str:
         if obj["type"] == "xsd:Date":
             return f'"{obj["value"]}"^^xsd:Date'
-        return f'<{obj["uri"]}>'
+        return sparql_escape_uri(obj["uri"])
 
     @staticmethod
     def _object_result_object(obj: dict) -> str | None:
@@ -79,10 +80,10 @@ class EntityFormatter:
         uri = obj["uri"]
         uid = obj["uuid"]
         return (
-            f'<{uri}> a <http://www.w3.org/2006/time#ProperInterval> ;\n'
+            f'{sparql_escape_uri(uri)} a {sparql_escape_uri("http://www.w3.org/2006/time#ProperInterval")} ;\n'
             f'    mu:uuid "{uid}" ;\n'
-            f'    <http://www.w3.org/2006/time#hasBeginning> "{obj["hasBeginning"]}"^^xsd:Date ;\n'
-            f'    <http://www.w3.org/2006/time#hasEnd> "{obj["hasEnd"]}"^^xsd:Date .'
+            f'    {sparql_escape_uri("http://www.w3.org/2006/time#hasBeginning")} "{obj["hasBeginning"]}"^^xsd:Date ;\n'
+            f'    {sparql_escape_uri("http://www.w3.org/2006/time#hasEnd")} "{obj["hasEnd"]}"^^xsd:Date .'
         )
 
     @staticmethod
