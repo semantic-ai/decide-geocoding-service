@@ -27,6 +27,19 @@ class NerConfig(BaseModel):
         default=True,
         description="Whether to apply post-processing to extracted entities"
     )
+    validate_persons: bool = Field(
+        default=True,
+        description="Whether to drop malformed person/mandatary entities "
+                    "(spans containing digits or characters invalid in names)"
+    )
+    min_confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Optional confidence floor in [0, 1]. When set, entities "
+                    "scoring below it are dropped. When omitted/null, no "
+                    "confidence filtering is applied (acts as off)."
+    )
     labels: list[str] = Field(
         default_factory=lambda: ["CITY", "DOMAIN", "HOUSENUMBERS", "INTERSECTION", "POSTCODE", "PROVINCE", "ROAD", "STREET"],
         description="List of NER labels to extract"
