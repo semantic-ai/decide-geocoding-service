@@ -18,8 +18,8 @@ NER_MODELS = {
         'nl': 'flair/ner-dutch'
     },
     'huggingface': {
-        'nl': 'PedroDKE/multilingual-ner-abb',
-        'en': 'PedroDKE/multilingual-ner-abb',
+        'nl': 'PedroDKE/multilingual-ner-abb-improved',
+        'en': 'PedroDKE/multilingual-ner-abb-improved',
         'aggregation_strategy': 'simple'
     },
     'refinement': {
