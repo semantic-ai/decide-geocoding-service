@@ -1,6 +1,6 @@
 import json
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 from pydantic import BaseModel
 
 from langchain.chat_models import init_chat_model
@@ -8,6 +8,8 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from ..retry import retry_call
 import json_repair
 from helpers import logger
+
+MARKER_RE = re.compile(r'^L(\d+)\| ?')
 
 
 class LLMAnalyzer:
@@ -51,38 +53,50 @@ class LLMAnalyzer:
             max_retries=0,
         )
 
-    def analyze_single_entry_simple(
-        self,
-        text: str,
-        system_prompt: str,
-        user_prompt_template: str,
-        output_model: BaseModel,
-        text_limit: int = 8000,
-    ) -> Dict[str, Any]:
-        
-        llm = self._chat_model.with_structured_output(
-            output_model,
-            method="function_calling",
-            include_raw=True,
-        )
-
-        user_prompt = user_prompt_template.format(text=text[:text_limit])
-
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
+    def preprocess(self, text: str, min_width: int = 4) -> Tuple[str, List[str], int]:
+        """
+        numbered_text : LNNNN|-prefixed, '\\n'-joined  -> send this to the LLM
+        lines         : exact original pieces (split on '\\n') -> keep for reconstruction
+        width         : zero-pad width used
+        Contract:  '\\n'.join(lines) == text   (byte-exact, always)
+        """
+        lines = text.split('\n')
+        width = max(min_width, len(str(len(lines))))
+        numbered = [
+            f"L{i:0{width}d}| {line.rstrip(chr(13))}"
+            for i, line in enumerate(lines, start=1)
         ]
+        return '\n'.join(numbered), lines, width
 
-        response = retry_call(llm.invoke, messages,max_retries=self._max_retries, retry_delay=self._retry_delay)
+    def _clean_tag(self, t: str) -> str:
+        return t.strip().strip("<>").strip()
 
-        if response["parsing_error"]:
-            raise ValueError(
-                f"Structured output parsing failed: {response['parsing_error']}"
-            )
+    def reconstruct(self, lines: List[str], spans: List[Dict[str, Any]]) -> str:
+        n = len(lines)
+        opens = {i: [] for i in range(n)}
+        closes = {i: [] for i in range(n)}
+        subline = {i: [] for i in range(n)}
+        for order, s in enumerate(spans):
+            a, b, tag = s['start_line'] - 1, s['end_line'] - 1, self._clean_tag(s['tag'])
+            if s.get('text') is not None:
+                assert a == b
+                subline[a].append((order, tag, s['text']))
+            else:
+                opens[a].append((order, b - a, tag))
+                closes[b].append((order, b - a, tag))
+        out = []
+        for i in range(n):
+            open_str = ''.join(f'<{t}>' for _, _, t in sorted(opens[i], key=lambda x: (-x[1], x[0])))
+            close_str = ''.join(f'</{t}>' for _, _, t in sorted(closes[i], key=lambda x: (x[1], -x[0])))
+            body = lines[i]
+            for _, tag, needle in subline[i]:
+                idx = body.find(needle)
+                if idx == -1:
+                    raise ValueError(f"sub-line text {needle!r} not on line {i+1}")
+                body = body[:idx] + f'<{tag}>' + needle + f'</{tag}>' + body[idx + len(needle):]
+            out.append(open_str + body + close_str)
+        return '\n'.join(out)
 
-        parsed = response["parsed"]
-
-        return parsed.model_dump()
 
     def analyze_single_entry(
         self,
@@ -91,17 +105,30 @@ class LLMAnalyzer:
         user_prompt_template: str,
         expected_schema: Dict[str, Any],
         text_limit: int = 8000,
+        preprocess: bool = False,
+        postprocess: bool = False,
     ) -> Dict[str, Any]:
 
-        user_prompt = user_prompt_template.format(text=text[:text_limit])
+        if preprocess:
+            numbered_text, lines, _ = self.preprocess(text)
+            limited_text = numbered_text
+            user_prompt = user_prompt_template.format(text=limited_text, numbered_text=limited_text)
+        else:
+            user_prompt = user_prompt_template.format(text=text)
+
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
         ]
 
         try:
-            response = retry_call(self._chat_model.invoke, messages,max_retries=self._max_retries, retry_delay=self._retry_delay)
+            response = retry_call(self._chat_model.invoke, messages, max_retries=self._max_retries,
+                                  retry_delay=self._retry_delay)
             result = self._parse_json(response.content)
+
+            if postprocess and 'spans' in result:
+                result['tagged_text'] = self.reconstruct(lines, result.get('spans', []))
+
             return self._validate_result(result, expected_schema)
 
         except Exception as e:
