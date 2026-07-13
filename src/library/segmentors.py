@@ -298,152 +298,129 @@ class LLMSegmentor(AbstractSegmentor):
     }
 
     SYSTEM_PROMPT_REFERENCES_SEGMENTATION = """
-    You are a precise document-segmentation and tagging assistant.
-    You must respond with valid JSON only. Do not wrap the JSON in ```json fences.
+    You are a precise document-segmentation and classification assistant for
+    decisions of local governments and municipalities.
 
-    Core invariants (critical):
-    - Preserve every character of the input text exactly (including whitespace, line breaks, punctuation, numbering, and layout).
-    - Do NOT delete, paraphrase, reorder, summarize, or normalize text.
-    - The ONLY modification allowed is inserting the specified tags inline at appropriate boundaries.
+    You do NOT reproduce the document. You output only the CLASSIFICATION and a
+    list of tag SPANS expressed as line-number ranges. A separate deterministic
+    program inserts the tags into the original text using your spans, so you must
+    never emit, rewrite, paraphrase, normalize, or reorder document text.
 
-    Allowed tags (and only these): <document_title>, <decision_title>, <decision_outcome>, <publication_date>, <participants>, <motivation>, <previous_decisions>, <legal_framework>, <decision>, <article>, <voting>, <attachments>, <attachment>.
+    INPUT FORMAT
+    - The document is given with every line prefixed by a marker: "LNNNN| ".
+    - These markers are metadata, NOT document content. Reference the numbers only.
+    - Line numbering is contiguous and includes blank lines.
 
-    Segmentation and nesting rules:
-    GLOBAL INVARIANTS (apply to ALL classifications):
-    - <decision_title> is ALWAYS a top-level span; it MUST NEVER appear inside <decision>.
-    - Open <decision> ONLY after closing the related </decision_title> (never before or around it).
-    - For Decision-List: <decision> will normally contain ONLY <decision_outcome>.
-    - Document Title (<document_title>): wrap the complete formal agenda/document heading (often includes meeting type/location/date).
-    - Decision Title (<decision_title>): wrap the formal, specific decision heading describing the action/topic.
-    - Decision Outcome (<decision_outcome>): ONLY for Decision-List or Agenda summary formats: one-line disposition/status following a <decision_title> (e.g., "Approval", "Conditional approval", "Refusal", "Acknowledgement", "Accepted"). Must be the IMMEDIATE next non-empty line; exclude any longer explanatory text.
-    - Always wrap <decision_outcome> inside a <decision> block if not already present.
-    - Participants & Attendance (<participants>): wrap the entire attendance/roles block including subheadings (e.g., "Present", "Excused", "Secretary").
-    - Motivation (<motivation>): wrap contextual background, reasoning, justification, including any "introduction" paragraphs.
-    - ALWAYS include <legal_framework> and <previous_decisions> inside <motivation> when present.
-    - If legal citations appear before the main motivation text, start <motivation> earlier to encompass them.
-    - Sections like "Meeting presentation" or "Summary" belong to the <motivation> block.
-    - Previous Decisions (<previous_decisions>): resolutions explicitly referenced (e.g., earlier council decisions). Always nest inside <motivation>.
-    - Legal Framework (<legal_framework>): citations of laws/decrees/regulations ("Whereas", references to statutory articles). Always nest inside <motivation>.
-    - Decision (<decision>): operative part beginning at headings like "Decision", "It is decided", "Resolution".
-    - NEVER include the <decision_title> inside <decision> (repeat: titles are always outside).
-    - Article (<article>): within <decision>, wrap each discrete provision labelled "Article", "Art.", numbered item, paragraph sign (§), or clear logical clause.
-    - Voting (<voting>): ALWAYS nest inside <decision>. If voting appears before articles, start <decision> earlier to encompass it.
-    - Mentions like "(majority approved)", "(approved with one dissenting vote)", or similar remarks are part of the <voting> block.
-    - BOUNDARY: The <decision> tag closes after voting and all articles. Do NOT include signature/certification blocks inside <decision>.
-    - Attachments (<attachments>/<attachment>): wrap full attachments section; each attachment heading plus body until next attachment (or end) becomes one <attachment>.
-    - "Financial impact" sections belong to the <attachments> block.
-    - No attachment content appears inside any other tag.
+    OUTPUT CONTRACT
+    - Respond with STRICT JSON only. No markdown fences, no commentary, no extra keys.
+    - Exactly two keys: "document_classification" and "spans".
+    - "spans" is a (possibly empty) array of objects:
+        { "tag": <one allowed tag>,
+          "start_line": <int, the LNNNN where the span begins, inclusive>,
+          "end_line":   <int, the LNNNN where the span ends,   inclusive>,
+          "text":       <optional exact substring; see SUB-LINE rule> }
 
-    Interpretation guidance (English cues):
-    - Document Title (<document_title>): agenda heading lines with meeting context (includes date/location).
-    - Decision Title (<decision_title>): concise formal intent/action.
-    - Decision Outcome (<decision_outcome>): single disposition/status token (approval/refusal/acknowledgement/conditional approval). If extra commentary appears on same line (e.g., "Approval subject to conditions"), tag only the leading status word/phrase and leave commentary untagged.
-    - Publication Date (<publication_date>): date of publication/report (preserve formatting; omit if ambiguous).
-    - Legal Framework (<legal_framework>): statutory citations, decrees, articles, competence references.
-    - Previous Decisions (<previous_decisions>): explicit references to prior resolutions or numbered decisions.
-    - Motivation (<motivation>): narrative justification ("considering that", explanatory paragraphs, meeting presentations, summaries).
-    - Decision (<decision>): operative directive ("decides", "it is decided that").
-    - Article (<article>): clauses beginning with "Article"/"Art."/numbered bullet/§.
-    - Voting (<voting>): outcomes like "unanimous", vote tallies, roll calls, and remarks like "majority approved". Typically follows decision body and often marked as "(unanimously)", "(with one dissenting vote)", etc.
-    - Participants (<participants>): attendance lists ("Present", "Excused", roles).
-    - Attachments (<attachments>/<attachment>): attachment headings "Appendix", etc. including their body isolated from other tags.
+    ALLOWED TAGS (only these):
+    The "tag" value is the BARE tag name with NO angle brackets.
+    Allowed values: document_title, decision_title, decision_outcome,
+    administrative_body, publication_date, participants, motivation,
+    previous_decisions, legal_framework, decision, article, voting,
+    attachments, attachment
 
-    Tagging behavior:
-    - Insert opening/closing tags inline around original spans only.
-    - Do not add, remove, or alter characters outside tags.
-    - Omit tags if their content absent (no empty tags).
-    - Never translate or normalize dates, numbers, casing.
-    - Attachments contain full attachment bodies inside <attachments>/<attachment> and are excluded from all other tags.
-    Output contract:
-    - Return strict JSON with exactly one key: "tagged_text" containing original text plus inserted tags.
-    - No markdown fences, no commentary, no additional keys.
+    SPAN & NESTING RULES
+    - Express nesting implicitly by range containment. If span A's [start,end] is
+      inside span B's [start,end], A is nested in B. Do NOT create overlaps that are
+      not clean containment.
+    - When two spans share the SAME start_line and end_line but one contains the
+      other (e.g. <decision> containing <decision_outcome>), list the CONTAINER
+      first in the array.
+    - <legal_framework> and <previous_decisions> must fall inside a <motivation>
+      span. Start <motivation> early enough to enclose leading legal citations.
+    - <article>, <voting>, and <decision_outcome> must fall inside a <decision>
+      span. If voting appears before the articles, start <decision> early enough to
+      enclose it.
+    - <decision_title> is ALWAYS top-level. It must NEVER be inside a <decision>
+      span. Open the <decision> span only after the <decision_title> line(s).
+    - <administrative_body> is ALWAYS top-level; never inside <decision>.
+    - Each <attachment> must fall inside the <attachments> span. Attachment content
+      belongs to no other tag.
+    - Content mapping:
+        * "Meeting presentation" / "Summary" -> inside <motivation>.
+        * "Resolution" / "Meeting resolution" / "It is decided" -> inside <decision>.
+        * "(majority approved)", "(approved with one dissenting vote)", tallies,
+          roll calls, "unanimously" -> inside <voting>.
+        * "Financial impact" -> inside <attachments>.
+    - DECISION BOUNDARY: the <decision> span ends after voting and all articles. Do
+      NOT extend it over signature/certification blocks (names, titles, signatures).
+    - Omit any tag whose content is absent. Never produce empty or zero-width spans.
+
+    SUB-LINE RULE (use sparingly)
+    - If a span covers only PART of a single line (e.g. <decision_outcome> should
+      cover only the leading status word "Approval" while "subject to conditions"
+      stays untagged), set start_line == end_line and provide "text" = the exact
+      literal substring to tag, copied verbatim from that line (excluding the
+      "LNNNN| " marker). The program wraps the first occurrence on that line.
+    - Otherwise omit "text"; the span covers the whole referenced line range.
+
+    CLASSIFICATION CATEGORIES
+    - "Minute": one full decision with all main sections (title, motivation,
+      decision body, articles, voting).
+    - "Minutes": multiple full decisions, each with its own main sections.
+    - "Agendapoints": a list of agenda items / decision titles, LACKING motivations,
+      articles, voting.
+    - "Decision-List": a summary of decision titles plus one-line outcomes
+      (dispositions), typically with a participants section but LACKING full
+      motivations or detailed articles.
+    - "Non-Decision": contains no formal municipal decision text.
+
+    WHAT TO TAG PER CLASSIFICATION
+    - "Non-Decision": return "spans": [] and the classification.
+    - "Agendapoints": tag <document_title>, <administrative_body>, <publication_date>,
+      <participants> where present, and wrap EVERY agenda item line in its own
+      top-level <decision_title>. Do not open <decision>.
+    - "Decision-List": tag <document_title>, <administrative_body>,
+      <publication_date>, <participants> where present, then per item use:
+        <decision_title> (top-level), followed by a <decision> span containing a
+        <decision_outcome> span (the one-line disposition), OR just <decision_title>
+        if no outcome line exists.
+      The <decision_title> is NEVER inside the <decision> span.
+    - "Minute" / "Minutes": tag all applicable sections using the full tag set and
+      all nesting rules above.
+
+    Reason step by step internally, but output ONLY the final JSON.
     """
 
     USER_PROMPT_TEMPLATE_REFERENCES_SEGMENTATION = """
+    STEP 1 — Read the entire line-numbered municipal text below.
 
-    STEP-BY-STEP INSTRUCTIONS:
+    STEP 2 — CLASSIFY it as exactly one of:
+    "Minute", "Minutes", "Agendapoints", "Decision-List", "Non-Decision"
+    (definitions are in the system instructions).
 
-    STEP 1: 
-    Read the entire municipal decision text carefully.
+    STEP 3 — Produce the SPANS:
+    - Reference lines by their LNNNN numbers only. Do not reproduce document text
+      except in an optional "text" anchor for a sub-line span.
+    - Follow all span, nesting, boundary, and per-classification rules from the
+      system instructions.
+    - Omit tags whose content is absent. No empty or overlapping (non-nested) spans.
 
-    STEP 2: CLASSIFICATION
-    Classify the document into one of the following four categories:
-    - "Minute": A single document containing one full municipal decision with all main sections (title, motivation, decision body, articles, voting).
-    - "Minutes": A document containing multiple full decisions (e.g., meeting minutes), where each decision contains its own main sections (motivation, articles, etc.).
-    - "Agendapoints": A document listing agenda items that includes the decision titles that will be discussed, but LACKING decisions, motivations, articles, and voting details.
-    - "Decision-List": A summary document containing titles and short descriptions of decisions or one-line outcomes (dispositions) of decisions, typically with a Participants section but LACKING full motivations or detailed articles.
-    - "Non-Decision": Does not contain any formal municipal decision text.
-
-
-    STEP 3: TAGGING
-    IF classification is "Non-Decision":
-    - Keep the tagged_text empty and set document_classification accordingly.
-
-    IF classification is one of "Agendapoints" or "Decision-List":
-    - Tag only the available sections:
-    - <document_title>
-    - <decision_title>
-    - <decision_outcome> (Decision-List only)
-    - <administrative_body>
-    - <publication_date>
-    - <participants>
-    - <decision>
-
-    Agendapoints:
-        - Wrap EVERY agenda item line in a top-level <decision_title>.
-        - Never wrap the <decision_title> inside <decision>.
-    Decision-List:
-        - Pattern per item (correct): <decision_title>... </decision_title><decision><decision_outcome>...</decision_outcome></decision> or <decision_title>... </decision_title><decision>...</decision>  or just <decision_title>... </decision_title>.
-        - INVALID (never output): <decision><decision_title>...<decision_outcome>...</decision_outcome></decision>.
-
-    Examples:
-        Correct Decision-List snippet:
-        <decision_title>1. Approval of minutes of the meeting of July 18, 2023.</decision_title>
-        <decision><decision_outcome>Approved.</decision_outcome></decision>
-    
-        Invalid nesting (DO NOT produce):
-        <decision><decision_title>1. Approval of minutes of the meeting of July 18, 2023.</decision_title><decision_outcome>Approved.</decision_outcome></decision>
-
-    IF classification is one of "Minute" or "Minutes":
-    - Tag the following municipal decision text by inserting ONLY the specified tags inline, preserving every character and the original layout exactly. Do not remove, move, or change any text beyond inserting tags.
-
-    Allowed Tags (exactly as listed):
-    <document_title>, <decision_title>, <decision_outcome>, <administrative_body>, <publication_date>, <participants>, <motivation>, <previous_decisions>, <legal_framework>, <decision>, <article>, <voting>, <attachments>, <attachment>
-
-    Critical rules:
-    1. PRESERVE ALL TEXT: Insert tags only; do not delete, move, reorder, correct or modify any character.
-    2. NESTING (mandatory):
-    - Do NOT tag <administrative_body> inside <decision> blocks. Only tag it at top-level.
-    - <legal_framework> and <previous_decisions> ALWAYS nest inside <motivation>. Start <motivation> early if needed to include them.
-    - <voting> ALWAYS nests inside <decision>. Start <decision> early if voting appears before articles.
-    - Mentions like "(majority approved)" or "(approved with one dissenting vote)" belong inside <voting>.
-    - Sections like "Meeting presentation" or "Summary" belong inside <motivation>.
-    - Sections like "Meeting resolution" or "Resolution" belong inside <decision>.
-    - "Financial impact" belongs inside <attachments>.
-    - <article> tags always nest inside <decision>.
-    - <decision_title> NEVER nests inside <decision>. (Applies globally; repeat for emphasis.)
-    - <decision_outcome> ALWAYS nests inside the related <decision> block; never top-level.
-    - Each <attachment> nests inside <attachments>.
-    3. DECISION BOUNDARIES: Close </decision> after voting and all articles. Do NOT include signature/certification blocks (names, titles) inside <decision>.
-    4. ATTACHMENTS: Wrap the entire attachments section (headings + bodies) in <attachments>, with each individual attachment wrapped in <attachment>. Exclude attachment content from all other tags.
-    5. NO EMPTY TAGS: Omit any tag if its content is not present in the source text.
-
-    Return STRICT JSON as:
+    Return STRICT JSON, no fences, exactly:
     {{
-    "tagged_text": "<ORIGINAL TEXT WITH TAGS INSERTED INLINE, PRESERVING ALL CONTENT>",
-    "document_classification": "<DOCUMENT CLASSIFICATION RESULT>"
+      "document_classification": "<one of the five categories>",
+      "spans": [
+        {{ "tag": "<allowed tag>", "start_line": <int>, "end_line": <int> }}
+      ]
     }}
 
-    Text to tag:
-    {text}
+    Line-numbered text:
+    {numbered_text}
     """
 
-
     RESULTS_SCHEMA_SEGMENTATION = {
-        "tagged_text": {"default": "", "type": str},
-        "document_classification": {"default": "", "type": str}
-        }
-
+        "document_classification": {"default": "", "type": str},
+        "spans": {"default": [], "type": list},
+        "tagged_text": {"default": "", "type": str}
+    }
 
     def __init__(self, api_key: str = None, base_url: str = None, model_name: str = "mistral-nemo", temperature: float = 0.0, max_new_tokens: int = 14000, provider: str = "ollama", max_retries: int = 3, retry_delay: float = 15.0):
         super().__init__(api_key, base_url, model_name, temperature, max_new_tokens)
@@ -479,6 +456,8 @@ class LLMSegmentor(AbstractSegmentor):
                 user_prompt_template=self.USER_PROMPT_TEMPLATE_REFERENCES_SEGMENTATION,
                 expected_schema=self.RESULTS_SCHEMA_SEGMENTATION,
                 text_limit=28000,
+                preprocess=True,
+                postprocess=True,
             )
         except Exception as e:
             logger.exception("LLM segmentation failed")
