@@ -31,7 +31,7 @@ _INVALID_NAME_CHARS = frozenset("@#_=|<>{}~^")
 def is_valid_person_name(text: str) -> bool:
     """Return False for spans that cannot be a real person name.
 
-    Rejects spans that are empty, contain a long digit run, contain a garbage character, 
+    Rejects spans that are empty, contain a long digit run, contain a garbage character,
     or contain no letters at all. Role-annotation punctuation is allowed.
     """
     stripped = text.strip()
