@@ -12,7 +12,7 @@ class EntityFormatter:
 
     DATE_LABELS = frozenset({
         "DATE", "CONTEXT_DATE", "CONTEXT_PERIOD",
-        "ENTRY_DATE", "EXPIRY_DATE", "LEGAL_DATE",
+        "ENTRY_DATE", "EXPIRY_DATE",
         "PUBLICATION_DATE", "SESSION_DATE", "VALIDITY_PERIOD",
     })
 
@@ -27,7 +27,6 @@ class EntityFormatter:
         "CONTEXT_PERIOD":   ["interval"],
         "ENTRY_DATE":       ["date"],
         "EXPIRY_DATE":      ["date"],
-        "LEGAL_DATE":       ["date"],
         "PUBLICATION_DATE": ["date"],
         "SESSION_DATE":     ["date"],
         "VALIDITY_PERIOD":  ["interval"],
