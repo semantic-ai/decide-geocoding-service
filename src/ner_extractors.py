@@ -21,27 +21,27 @@ import torch
 # Person-type labels produced by the extractors (HuggingFace -> MANDATARY, spaCy/Flair PER -> PERSON). Validation only applies to these; labels like DATE or LOCATION legitimately contain digits and must be left untouched.
 PERSON_LABELS = frozenset({"PERSON", "PER", "MANDATARY"})
 
-# Characters allowed in a person name in addition to Unicode letters and
-# whitespace: hyphen (Jean-Pierre), period (initials "W."), apostrophes (O'Brien / D'Hondt) and comma (inverted "Surname, First").
-_ALLOWED_NAME_PUNCT = frozenset("-.'’,")
+# Short digits are legitimate (e.g. "2nd Deputy Mayor"). so allow for some numbers
+_LONG_DIGIT_RUN = re.compile(r"\d{3,}")
+
+# Characters that never occur in a person/role span.
+_INVALID_NAME_CHARS = frozenset("@#_=|<>{}~^")
 
 
 def is_valid_person_name(text: str) -> bool:
     """Return False for spans that cannot be a real person name.
 
-    Rejects spans that are empty, contain a digit (e.g. ``"Folkerts105001"``), 
-    or contain a character that never occurs in a name (``@ / _ \\ § = ( ) ...``).
-    Letters of any script (incl. ``ß``, umlauts, accents), spaces and a small punctuation set are allowed,
-    so valid names like ``"Michael Haußmann"`` pass.
+    Rejects spans that are empty, contain a long digit run, contain a garbage character,
+    or contain no letters at all. Role-annotation punctuation is allowed.
     """
     stripped = text.strip()
     if not stripped:
         return False
-    for ch in stripped:
-        if ch.isspace() or ch.isalpha() or ch in _ALLOWED_NAME_PUNCT:
-            continue
-        return False  # digit or invalid character -> not a name
-    return True
+    if _LONG_DIGIT_RUN.search(stripped):
+        return False
+    if any(ch in _INVALID_NAME_CHARS for ch in stripped):
+        return False
+    return any(ch.isalpha() for ch in stripped)
 
 
 # ============================================================================
@@ -165,7 +165,7 @@ class BaseExtractor:
         kept = []
         for entity in entities:
             if entity['label'] in PERSON_LABELS and not is_valid_person_name(entity['text']):
-                logger.debug(
+                logger.info(
                     f"Dropping malformed {entity['label']} entity: {entity['text']!r}"
                 )
                 continue
@@ -181,7 +181,7 @@ class BaseExtractor:
         kept = []
         for entity in entities:
             if entity.get('confidence', 1.0) < min_confidence:
-                logger.debug(
+                logger.info(
                     f"Dropping low-confidence {entity['label']} entity "
                     f"{entity['text']!r} (score={entity.get('confidence')})"
                 )
