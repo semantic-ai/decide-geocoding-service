@@ -35,7 +35,7 @@ NER_MODELS = {
             'entry_date',
             'expiry_date',
             'impact_location',
-            'legal_date',
+            'legal_date',  # kept for correct positional indexing; filtered out post-refinement in EntityRefiner.refine
             'publication_date',
             'session_date',
             'validity_period'

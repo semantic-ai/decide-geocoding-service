@@ -499,12 +499,15 @@ class EntityRefiner:
                 # Map prediction to label
                 if pred_idx < len(label_classes):
                     refined_label = label_classes[pred_idx].upper()
-                    
-                    # Create refined entity (preserve original label)
-                    refined_entity = dict(entity)
-                    refined_entity['original_label'] = entity['label']
-                    refined_entity['label'] = refined_label
-                    refined_entities.append(refined_entity)
+
+                    # legal_date is a valid model output but is intentionally
+                    # not processed further downstream - discard it here.
+                    if refined_label != "LEGAL_DATE":
+                        # Create refined entity (preserve original label)
+                        refined_entity = dict(entity)
+                        refined_entity['original_label'] = entity['label']
+                        refined_entity['label'] = refined_label
+                        refined_entities.append(refined_entity)
                 else:
                     # If prediction is out of range, keep original
                     refined_entities.append(entity)
