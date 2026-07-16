@@ -19,6 +19,7 @@ from ..entity_mappers import map_entity_to_annotations, resolve_work_uri_for_exp
 from ..helper_functions import fail_if_no_successes
 from ..library.entity_projections import project_spans
 from ..library.entity_formatter import EntityFormatter
+from .dedup import get_existing_annotations
 
 # Instantiate a single EntityFormatter to reuse across tasks.
 entity_formatter = EntityFormatter()
@@ -325,9 +326,30 @@ class EntityExtractionTask(DecisionTask):
         expression_uris = eli_expressions["expression_uris"]
         skipped_empty = 0
 
+        # Expressions that already have entity annotations were processed
+        # before; reuse those annotations instead of re-extracting
+        already_extracted = get_existing_annotations(
+            expression_uris, get_agent_uri("ner_extractor"))
+        if already_extracted:
+            logger.info(
+                f"{len(already_extracted)} of {len(expression_uris)} "
+                f"expressions already have entity annotations, reusing those")
+
         for i in range(len(expression_uris)):
             target_expression_uri = expression_uris[i]
             target_english_text = eli_expressions["expression_contents"][i]
+
+            if target_expression_uri in already_extracted:
+                logger.info(
+                    f"Expression {target_expression_uri} already has "
+                    f"{len(already_extracted[target_expression_uri])} entity "
+                    f"annotations, passing those forward without re-extracting")
+                # pass the existing annotations forward so the linking task
+                # can still process them
+                for annotation_uri in already_extracted[target_expression_uri]:
+                    self.results_container_uris.append(
+                        self.create_output_container(annotation_uri))
+                continue
 
             logger.info(
                 f"Processing entity extraction for source: {target_expression_uri}")
