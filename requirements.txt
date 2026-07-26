@@ -24,7 +24,7 @@ datasets==4.8.5
 rdflib==7.2.1
 gitpython==3.1.50
 pytz==2026.2
-fastapi==0.118.2
+fastapi==0.121.1
 pydantic==2.12.5
 sparqlwrapper==2.0.0
 translatepy==2.3
