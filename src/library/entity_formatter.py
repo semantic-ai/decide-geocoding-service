@@ -68,21 +68,21 @@ class EntityFormatter:
 
     @staticmethod
     def _object_formatted_text(obj: dict) -> str:
-        if obj["type"] == "xsd:Date":
-            return f'"{obj["value"]}"^^xsd:Date'
+        if obj["type"] == "xsd:date":
+            return f'"{obj["value"]}"^^xsd:date'
         return sparql_escape_uri(obj["uri"])
 
     @staticmethod
     def _object_result_object(obj: dict) -> str | None:
-        if obj["type"] == "xsd:Date":
+        if obj["type"] == "xsd:date":
             return None
         uri = obj["uri"]
         uid = obj["uuid"]
         return (
             f'{sparql_escape_uri(uri)} a {sparql_escape_uri("http://www.w3.org/2006/time#ProperInterval")} ;\n'
             f'    mu:uuid "{uid}" ;\n'
-            f'    {sparql_escape_uri("http://www.w3.org/2006/time#hasBeginning")} "{obj["hasBeginning"]}"^^xsd:Date ;\n'
-            f'    {sparql_escape_uri("http://www.w3.org/2006/time#hasEnd")} "{obj["hasEnd"]}"^^xsd:Date .'
+            f'    {sparql_escape_uri("http://www.w3.org/2006/time#hasBeginning")} "{obj["hasBeginning"]}"^^xsd:date ;\n'
+            f'    {sparql_escape_uri("http://www.w3.org/2006/time#hasEnd")} "{obj["hasEnd"]}"^^xsd:date .'
         )
 
     @staticmethod
@@ -157,7 +157,7 @@ class EntityFormatter:
             if shape == "interval":
                 objects.append(self._make_interval_obj(start_date, end_date))
             else:
-                objects.append({"type": "xsd:Date", "value": start_date})
+                objects.append({"type": "xsd:date", "value": start_date})
 
         first_obj = objects[0]
         base["formatted"] = {
@@ -169,8 +169,8 @@ class EntityFormatter:
             base["formatted"]["additional"] = [self._date_parse_dict(dr) for dr in parse_results[1:]]
         base["formatted_text"]  = self._object_formatted_text(first_obj)
         base["result_object"]   = self._object_result_object(first_obj)
-        base["formatted_start"] = f'"{start_date}"^^xsd:Date'
-        base["formatted_end"]   = f'"{end_date}"^^xsd:Date'
+        base["formatted_start"] = f'"{start_date}"^^xsd:date'
+        base["formatted_end"]   = f'"{end_date}"^^xsd:date'
         return base, objects
 
     def _format_location(self, entity: dict) -> tuple[dict, list[dict]]:
