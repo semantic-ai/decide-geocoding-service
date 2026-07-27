@@ -14,6 +14,7 @@ from decide_ai_service_base.annotation import RelationExtractionAnnotation
 
 from ..config import get_config
 from ..library.entity_projections import project_spans
+from .dedup import get_existing_annotations
 
 
 class SegmentationTask(DecisionTask):
@@ -278,9 +279,27 @@ class SegmentationTask(DecisionTask):
         expression_uris = eli_expressions["expression_uris"]
         skipped_empty = 0
 
+        # Expressions that already have segment annotations were processed
+        # before; skip re-segmenting those
+        already_segmented = get_existing_annotations(
+            expression_uris, get_agent_uri("segmenter"))
+        if already_segmented:
+            logger.info(
+                f"{len(already_segmented)} of {len(expression_uris)} "
+                f"expressions already have segment annotations, skipping those")
+
         for i in range(len(expression_uris)):
             target_expression_uri = expression_uris[i]
             target_english_text = eli_expressions["expression_contents"][i]
+
+            if target_expression_uri in already_segmented:
+                logger.info(
+                    f"Expression {target_expression_uri} was already "
+                    f"segmented, passing it forward without re-segmenting")
+                # still pass the expression forward so the NER task can resume
+                self.results_container_uris.append(
+                    self.create_output_container(target_expression_uri))
+                continue
 
             logger.info(
                 f"Processing segmentation for {target_expression_uri}")

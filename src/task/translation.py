@@ -17,6 +17,7 @@ from decide_ai_service_base.util import (
 from decide_ai_service_base.annotation import RelationExtractionAnnotation
 
 from ..config import get_config
+from .dedup import get_existing_translations
 
 
 class TranslationTask(DecisionTask):
@@ -340,12 +341,34 @@ class TranslationTask(DecisionTask):
         # Fetch the original text
         eli_expressions = self.fetch_eli_expressions()
 
+        # Expressions that already have a translation were processed before:
+        # reuse the existing translation instead of re-translating, but still
+        # pass it downstream so later tasks can resume where a previous run
+        # left off
+        existing_translations = get_existing_translations(
+            eli_expressions["expression_uris"])
+        if existing_translations:
+            logger.info(
+                f"{len(existing_translations)} of "
+                f"{len(eli_expressions['expression_uris'])} expressions "
+                f"already have a translation, reusing those")
+
         for i in range(len(eli_expressions["expression_uris"])):
             source_expression_uri = eli_expressions["expression_uris"][i]
             original_text = eli_expressions["expression_contents"][i]
             source_language = LANGUAGE_URI_TO_CODE.get(
                 eli_expressions["languages"][i], None)
             work_uri = eli_expressions["work_uris"][i]
+
+            if source_expression_uri in existing_translations:
+                logger.info(
+                    f"Expression {source_expression_uri} already has a "
+                    f"translation, reusing it instead of re-translating")
+                for translated_uri in existing_translations[source_expression_uri]:
+                    self.results_container_uris.append(
+                        self.create_output_container(translated_uri))
+                continue
+
             logger.info(
                 f"Processing translation for source: {source_expression_uri}")
 
@@ -353,7 +376,7 @@ class TranslationTask(DecisionTask):
             if not original_text or not original_text.strip():
                 logger.warning(
                     "No content found for source; skipping translation")
-                return
+                continue
 
             # Ensure we have an explicit source language
             if not source_language or source_language.lower() == "auto":
@@ -378,7 +401,7 @@ class TranslationTask(DecisionTask):
             if source_language.lower() == self.target_language.lower():
                 logger.info(
                     f"Text is already in target language ({self.target_language}), skipping translation")
-                return
+                continue
 
             # Get translator and translate
             translator = self.get_translator()
