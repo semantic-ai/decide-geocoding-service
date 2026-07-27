@@ -69,7 +69,7 @@ def get_existing_translations(expression_uris: list[str]) -> dict[str, list[str]
         expression_uris,
         f"""
         GRAPH ?g {{
-            ?expression <{SPARQL_PREFIXES['linguistics_translations']}> ?result .
+            ?expression {sparql_escape_uri(SPARQL_PREFIXES['linguistics_translations'])} ?result .
         }}
         """,
     )
