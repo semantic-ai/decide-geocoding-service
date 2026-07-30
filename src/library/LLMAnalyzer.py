@@ -2,12 +2,10 @@ import json
 import re
 import time
 from typing import Dict, Any, Optional, List, Tuple
-from pydantic import BaseModel
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage
-from ..retry import retry_call
-from ..ai_logging import record_llm_call
+from .retry import retry_call
 import json_repair
 from helpers import logger
 
@@ -31,12 +29,15 @@ class LLMAnalyzer:
         json_mode: bool = True,
         max_retries: int = 3,
         retry_delay: float = 15.0,
+        task: Optional[Any] = None,
+        endpoint: Optional[str] = None,
     ):
         self.model_name = model_name
         self._provider = provider
-        self._base_url = base_url
         self._max_retries = max_retries
         self._retry_delay = retry_delay
+        self._task = task
+        self._endpoint = endpoint or base_url or "local"
 
         kwargs: Dict[str, Any] = {"temperature": temperature}
         if api_key:
@@ -74,6 +75,9 @@ class LLMAnalyzer:
     def _clean_tag(self, t: str) -> str:
         return t.strip().strip("<>").strip()
 
+    def _clamp(self, idx, n):
+        return min(max(idx, 0), n - 1)
+
     def _locate(self, lines, i, needle, radius=8):
         # 1) exact on the stated line
         if 0 <= i < len(lines) and needle in lines[i]:
@@ -89,11 +93,16 @@ class LLMAnalyzer:
 
     def reconstruct(self, lines, spans):
         n = len(lines)
+        if n == 0:
+            return ""
         opens = {i: [] for i in range(n)}
         closes = {i: [] for i in range(n)}
         sublines = []  # (order, stated_line_idx, tag, needle) — line may drift
 
         for order, s in enumerate(spans):
+            if "start_line" not in s or "end_line" not in s or "tag" not in s:
+                logger.warning("Skipping malformed span (missing keys): %r", s)
+                continue
             a, b, tag = s['start_line'] - 1, s['end_line'] - 1, self._clean_tag(s['tag'])
             if s.get('text') is not None:
                 if a != b:
@@ -101,8 +110,14 @@ class LLMAnalyzer:
                                    "using start_line", s['text'], a + 1, b + 1)
                 sublines.append((order, a, tag, s['text']))
             else:
-                opens[a].append((order, b - a, tag))
-                closes[b].append((order, b - a, tag))
+                ca, cb = self._clamp(a, n), self._clamp(b, n)
+                if (ca, cb) != (a, b):
+                    logger.warning("Block span <%s> line range %d..%d out of bounds (1..%d); "
+                                   "clamped to %d..%d", tag, a + 1, b + 1, n, ca + 1, cb + 1)
+                if cb < ca:
+                    ca, cb = cb, ca
+                opens[ca].append((order, cb - ca, tag))
+                closes[cb].append((order, cb - ca, tag))
 
         # Mutable per-line buffer that sub-line tags are written into.
         out_lines = list(lines)
@@ -134,7 +149,6 @@ class LLMAnalyzer:
             out.append(open_str + out_lines[i] + close_str)
         return '\n'.join(out)
 
-
     def analyze_single_entry(
         self,
         text: str,
@@ -144,15 +158,14 @@ class LLMAnalyzer:
         text_limit: int = 8000,
         preprocess: bool = False,
         postprocess: bool = False,
-        task: Any = None,
     ) -> Dict[str, Any]:
 
         if preprocess:
             numbered_text, lines, _ = self.preprocess(text)
-            limited_text = numbered_text
+            limited_text = numbered_text[:text_limit]
             user_prompt = user_prompt_template.format(text=limited_text, numbered_text=limited_text)
         else:
-            user_prompt = user_prompt_template.format(text=text)
+            user_prompt = user_prompt_template.format(text=text[:text_limit])
 
         messages = [
             SystemMessage(content=system_prompt),
@@ -161,14 +174,12 @@ class LLMAnalyzer:
 
         try:
             start = time.monotonic()
-            response = retry_call(self._chat_model.invoke, messages, max_retries=self._max_retries,
-                                  retry_delay=self._retry_delay)
+            response = retry_call(self._chat_model.invoke, messages, max_retries=self._max_retries, retry_delay=self._retry_delay)
             duration = time.monotonic() - start
 
-            if task is not None:
-                endpoint = self._base_url if self._base_url else self._provider
-                model_uri = f"{self._provider}:{self.model_name}"
-                record_llm_call(task, endpoint, model_uri, response, duration)
+            if self._task is not None:
+                from .ai_logging import record_llm_call
+                record_llm_call(self._task, self._endpoint, response, duration)
 
             result = self._parse_json(response.content)
 
