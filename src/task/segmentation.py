@@ -313,7 +313,7 @@ class SegmentationTask(DecisionTask):
 
             # Segment English text
             segmentor = self._create_segmentor()
-            segments = segmentor.segment(target_english_text)
+            segments = segmentor.segment(target_english_text, task=self)
 
             # Explicitly exclude title segments as this is already done in PDF content extraction service
             segments = [segment for segment in segments if segment["label"].lower() != "title"]

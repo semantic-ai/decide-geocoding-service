@@ -24,6 +24,16 @@ _callback_lock = threading.Lock()
 class ETRanslationService(BaseTranslator):
     """eTranslation adapter for translatepy."""
 
+    _task = None
+
+    @property
+    def task(self):
+        return self._task
+
+    @task.setter
+    def task(self, value):
+        self._task = value
+
     def __init__(self, **kwargs):
         if BaseTranslator != object:
             super().__init__(**kwargs)
@@ -292,7 +302,7 @@ class ETRanslationService(BaseTranslator):
             raise ValueError(
                 "eTranslation credentials not configured. Set either bearer_token or username/password in config.json (translation.etranslation)"
             )
-        
+
         dest_lang = self._get_lang_code(destination_language)
         src_lang = self._get_lang_code(source_language)
 
@@ -302,20 +312,29 @@ class ETRanslationService(BaseTranslator):
                 "Provide language code (e.g., 'EN', 'FR', 'NL')"
             )
 
+        start = time.time()
         if len(text) > self.config.max_text_length:
-            return self._translate_chunked(text, dest_lang, src_lang, source_language, destination_language)
-        
-        self.logger.info(f"Translation request: {src_lang} → {dest_lang} ({len(text)} chars)")
-        
-        request_id = self._submit_translation_request(text, dest_lang, src_lang)
-        self.logger.info(f"Request ID: {request_id}")
-        
-        translated_text = self._wait_for_callback(request_id, dest_lang)
-        
-        return TranslationResult(
-            service="eTranslation",
-            source=text,
-            result=translated_text,
-            source_language=source_language if isinstance(source_language, Language) else Language(src_lang),
-            destination_language=destination_language if isinstance(destination_language, Language) else Language(dest_lang),
-        )
+            result = self._translate_chunked(text, dest_lang, src_lang, source_language, destination_language)
+        else:
+            self.logger.info(f"Translation request: {src_lang} → {dest_lang} ({len(text)} chars)")
+
+            request_id = self._submit_translation_request(text, dest_lang, src_lang)
+            self.logger.info(f"Request ID: {request_id}")
+
+            translated_text = self._wait_for_callback(request_id, dest_lang)
+
+            result = TranslationResult(
+                service="eTranslation",
+                source=text,
+                result=translated_text,
+                source_language=source_language if isinstance(source_language, Language) else Language(src_lang),
+                destination_language=destination_language if isinstance(destination_language, Language) else Language(dest_lang),
+            )
+        duration = time.time() - start
+
+        if self._task is not None:
+            from .ai_logging import record_ml_call
+            model_uri = "http://data.lblod.info/ontology/airo#etranslation"
+            record_ml_call(self._task, self.config.base_url, model_uri, duration)
+
+        return result

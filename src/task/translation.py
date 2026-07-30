@@ -406,6 +406,11 @@ class TranslationTask(DecisionTask):
             # Get translator and translate
             translator = self.get_translator()
 
+            # Attach task reference to underlying service(s) for AI call logging
+            for svc in getattr(translator, "services_list", []):
+                if hasattr(svc, "task"):
+                    svc.task = self
+
             logger.info(
                 f"Translating from {source_language} to {self.target_language}")
 

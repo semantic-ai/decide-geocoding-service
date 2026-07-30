@@ -1,11 +1,13 @@
 import json
 import re
+import time
 from typing import Dict, Any, Optional, List, Tuple
 from pydantic import BaseModel
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage
 from ..retry import retry_call
+from ..ai_logging import record_llm_call
 import json_repair
 from helpers import logger
 
@@ -32,6 +34,7 @@ class LLMAnalyzer:
     ):
         self.model_name = model_name
         self._provider = provider
+        self._base_url = base_url
         self._max_retries = max_retries
         self._retry_delay = retry_delay
 
@@ -141,6 +144,7 @@ class LLMAnalyzer:
         text_limit: int = 8000,
         preprocess: bool = False,
         postprocess: bool = False,
+        task: Any = None,
     ) -> Dict[str, Any]:
 
         if preprocess:
@@ -156,8 +160,16 @@ class LLMAnalyzer:
         ]
 
         try:
+            start = time.monotonic()
             response = retry_call(self._chat_model.invoke, messages, max_retries=self._max_retries,
                                   retry_delay=self._retry_delay)
+            duration = time.monotonic() - start
+
+            if task is not None:
+                endpoint = self._base_url if self._base_url else self._provider
+                model_uri = f"{self._provider}:{self.model_name}"
+                record_llm_call(task, endpoint, model_uri, response, duration)
+
             result = self._parse_json(response.content)
 
             if postprocess and 'spans' in result:

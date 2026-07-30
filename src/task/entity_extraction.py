@@ -129,7 +129,7 @@ class EntityExtractionTask(DecisionTask):
 
         # Extract entities using the factory pattern
         entities = extract_entities(
-            task_data, language=language, method=method)
+            task_data, language=language, method=method, task=self)
         logger.info(f"Found {len(entities)} general entities")
 
         return entities
