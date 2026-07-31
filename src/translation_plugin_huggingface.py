@@ -4,6 +4,7 @@ Uses Helsinki-NLP OPUS-MT models for high-quality translation.
 """
 
 import re
+import time
 from transformers import MarianMTModel, MarianTokenizer
 
 from translatepy.translators.base import BaseTranslator
@@ -21,11 +22,21 @@ HELSINKI_MODELS = {
 
 class HuggingFaceTranslateService(BaseTranslator):
     """Helsinki-NLP OPUS-MT translator service."""
-    
+
+    _task = None
+
+    @property
+    def task(self):
+        return self._task
+
+    @task.setter
+    def task(self, value):
+        self._task = value
+
     def __init__(self, **kwargs):
         if BaseTranslator != object:
             super().__init__(**kwargs)
-        
+
         self.logger = logger
         self._models = {}  # Cache: (src, tgt) -> (model, tokenizer)
     
@@ -202,15 +213,17 @@ class HuggingFaceTranslateService(BaseTranslator):
     def _translate(self, text: str, destination_language: str, source_language: str = "auto") -> str:
         src_lang = self._get_lang_code(source_language)
         tgt_lang = self._get_lang_code(destination_language)
-        
+
         self.logger.info(f"Translating {src_lang} → {tgt_lang} ({len(text)} chars)")
-        
+
         model, tokenizer = self._load_model(src_lang, tgt_lang)
-        
+        model_uri = HELSINKI_MODELS.get((src_lang, tgt_lang), f"helsinki-{src_lang}-{tgt_lang}")
+
         # Check token count to determine if chunking is needed
         # Use 256 limit to keep chunks small and avoid Helsinki model early stopping issues
         token_count = len(tokenizer.encode(text, add_special_tokens=True))
-        
+
+        start = time.monotonic()
         if token_count > 256:
             self.logger.info(f"Text exceeds token limit ({token_count} > 256), using chunking")
             translation = self._translate_chunked(text, tokenizer, model, src_lang, tgt_lang)
@@ -219,7 +232,12 @@ class HuggingFaceTranslateService(BaseTranslator):
             encoded = tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=256)
             translated = model.generate(**encoded, max_new_tokens=400)
             translation = tokenizer.decode(translated[0], skip_special_tokens=True)
-        
+        duration = time.monotonic() - start
+
+        if self._task is not None:
+            from decide_ai_service_base.ai_logging import record_ml_call
+            record_ml_call(self._task, "local", model_uri, duration)
+
         self.logger.info(f"Translation completed: {len(translation)} characters")
         return translation
     

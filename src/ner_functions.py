@@ -68,19 +68,20 @@ def get_extractor(language: str, extractor_type: str = 'composite'):
     return extractor(language)
 
 
-def extract_entities(text: str, language: str = None, method: str = None, refine: bool = None) -> List[Dict[str, Any]]:
+def extract_entities(text: str, language: str = None, method: str = None, refine: bool = None, task: Any = None) -> List[Dict[str, Any]]:
     """
     Extract entities from text using the specified language and method.
-    
+
     Args:
         text: Input text to process
         language: Language of the text ('de', 'nl', 'en'). Defaults to config.ner.language.
-        method: Extraction method ('composite', 'spacy', 'huggingface', 'flair', 'regex', 'title'). 
+        method: Extraction method ('composite', 'spacy', 'huggingface', 'flair', 'regex', 'title').
                 Defaults to config.ner.method.
         refine: Whether to apply entity refinement to classify generic labels (DATE, LOCATION)
                 into specific types (publication_date, impact_location, etc.).
                 Defaults to DEFAULT_SETTINGS['enable_refinement'].
-        
+        task: Optional Task instance for recording AI calls.
+
     Returns:
         List of entity dictionaries with keys: text, label, start, end.
 
@@ -101,12 +102,12 @@ def extract_entities(text: str, language: str = None, method: str = None, refine
     # Get extractor (cached). Raises ValueError on unsupported method/language.
     extractor = get_extractor(language, method)
 
-    entities = extractor.extract(text)
+    entities = extractor.extract(text, task=task)
 
     # Apply refinement if enabled
     if refine and entities:
         refiner = EntityRefiner()
-        entities = refiner.refine(entities, text)
+        entities = refiner.refine(entities, text, task=task)
         logger.debug(f"Applied entity refinement to {len(entities)} entities")
 
     return entities

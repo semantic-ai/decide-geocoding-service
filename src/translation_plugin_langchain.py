@@ -7,6 +7,7 @@ by setting config.translation.langchain.provider in config.json.
 """
 
 import re
+import time
 from typing import Dict
 
 from langchain.chat_models import init_chat_model
@@ -19,6 +20,7 @@ from helpers import logger
 
 from .config import get_config
 from .retry import retry_call
+from decide_ai_service_base.ai_logging import record_llm_call
 
 
 LANGUAGE_NAMES: Dict[str, str] = {
@@ -50,6 +52,16 @@ SYSTEM_PROMPT = (
 
 class LangChainTranslateService(BaseTranslator):
     """Provider-agnostic LangChain-backed translator."""
+
+    _task = None
+
+    @property
+    def task(self):
+        return self._task
+
+    @task.setter
+    def task(self, value):
+        self._task = value
 
     def __init__(self, **kwargs):
         if BaseTranslator != object:
@@ -139,7 +151,15 @@ class LangChainTranslateService(BaseTranslator):
             SystemMessage(content=SYSTEM_PROMPT),
             HumanMessage(content=self._build_user_message(text, source_language, destination_language)),
         ]
-        response = retry_call(self._chat_model.invoke, messages,max_retries=self.config.max_retries, retry_delay=self.config.retry_delay)
+        start = time.monotonic()
+        response = retry_call(self._chat_model.invoke, messages, max_retries=self.config.max_retries, retry_delay=self.config.retry_delay)
+        duration = time.monotonic() - start
+
+        if self._task is not None:
+            endpoint = self.config.base_url if self.config.base_url else self.config.provider
+            model_uri = f"{self.config.provider}:{self.config.model_name}"
+            record_llm_call(self._task, endpoint, model_uri, response, duration)
+
         translated = response.content.strip()
         if not translated:
             raise RuntimeError("LangChain translation returned an empty response")

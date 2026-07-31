@@ -9,6 +9,7 @@ Classes:
 - SpacyExtractor, FlairExtractor, etc.: Factory pattern implementations
 """
 import re
+import time
 from helpers import logger
 from flair.data import Sentence
 from typing import List, Dict, Any
@@ -16,6 +17,7 @@ from .ner_models import model_manager
 from .ner_config import REGEX_PATTERNS, NER_MODELS, LABEL_MAPPINGS
 from .config import get_config
 from .helper_functions import fail_if_no_successes
+from decide_ai_service_base.ai_logging import record_ml_call
 import torch
 
 # Person-type labels produced by the extractors (HuggingFace -> MANDATARY, spaCy/Flair PER -> PERSON). Validation only applies to these; labels like DATE or LOCATION legitimately contain digits and must be left untouched.
@@ -57,13 +59,14 @@ class BaseExtractor:
         self.config = get_config()
         self.extractor_type = extractor_type
     
-    def extract(self, text: str) -> List[Dict[str, Any]]:
+    def extract(self, text: str, task: Any = None) -> List[Dict[str, Any]]:
         """
         Extract entities from text. Must be implemented by subclasses.
-        
+
         Args:
             text: Input text to process
-            
+            task: Optional Task instance for recording AI calls.
+
         Returns:
             List of entity dictionaries with keys: text, label, start, end, confidence
         """
@@ -196,7 +199,7 @@ class SpacyExtractor(BaseExtractor):
     def __init__(self, language: str = 'en'):
         super().__init__(language, extractor_type='spacy')
     
-    def extract(self, text: str) -> List[Dict[str, Any]]:
+    def extract(self, text: str, task: Any = None) -> List[Dict[str, Any]]:
         """Extract entities using spaCy NER.
 
         Raises:
@@ -207,8 +210,14 @@ class SpacyExtractor(BaseExtractor):
                 is fatal.
         """
         nlp = model_manager.get_spacy_model(self.language)
+        model_uri = NER_MODELS['spacy'].get(self.language, f"spacy-{self.language}")
 
+        start = time.monotonic()
         doc = nlp(text)
+        duration = time.monotonic() - start
+
+        if task is not None:
+            record_ml_call(task, "local", model_uri, duration)
 
         entities = []
         for ent in doc.ents:
@@ -229,7 +238,7 @@ class HuggingFaceExtractor(BaseExtractor):
     def __init__(self, language: str = 'en'):
         super().__init__(language, extractor_type='huggingface')
     
-    def extract(self, text: str) -> List[Dict[str, Any]]:
+    def extract(self, text: str, task: Any = None) -> List[Dict[str, Any]]:
         """Extract entities using Hugging Face NER pipeline.
 
         Raises:
@@ -238,8 +247,14 @@ class HuggingFaceExtractor(BaseExtractor):
             Exception: Inference errors are propagated to the caller.
         """
         ner_pipeline = model_manager.get_huggingface_model(self.language)
+        model_uri = NER_MODELS['huggingface'].get(self.language, f"huggingface-{self.language}")
 
+        start = time.monotonic()
         results = ner_pipeline(text)
+        duration = time.monotonic() - start
+
+        if task is not None:
+            record_ml_call(task, "local", model_uri, duration)
 
         entities = []
         for result in results:
@@ -261,22 +276,28 @@ class FlairExtractor(BaseExtractor):
         super().__init__(language, extractor_type='flair')
         self.model_name = model_name  # Optional override, otherwise uses language from config
     
-    def extract(self, text: str) -> List[Dict[str, Any]]:
+    def extract(self, text: str, task: Any = None) -> List[Dict[str, Any]]:
         """Extract entities using Flair NER.
 
         Raises:
             ValueError / RuntimeError: Propagated from ``ModelManager.get_flair_model``
-                when the model is not configured or fails to load.
+                when the Flair model is not configured or fails to load.
             Exception: Prediction errors are propagated to the caller.
         """
         # Load the Flair SequenceTagger model using language from config or explicit model_name
         tagger = model_manager.get_flair_model(language=self.language, model_name=self.model_name)
+        model_uri = self.model_name or NER_MODELS['flair'].get(self.language, f"flair-{self.language}")
 
         # Create sentence (don't use tokenizer for legal texts as recommended)
         sentence = Sentence(text, use_tokenizer=False)
 
+        start = time.monotonic()
         # Predict NER tags using the SequenceTagger
         tagger.predict(sentence)
+        duration = time.monotonic() - start
+
+        if task is not None:
+            record_ml_call(task, "local", model_uri, duration)
 
         entities = []
         # Iterate over entities and extract information
@@ -310,10 +331,10 @@ class RegexExtractor(BaseExtractor):
                 for pattern in pattern_list
             ]
     
-    def extract(self, text: str) -> List[Dict[str, Any]]:
+    def extract(self, text: str, task: Any = None) -> List[Dict[str, Any]]:
         """Extract entities using regex patterns."""
         entities = []
-        
+
         for label, compiled_patterns in self._compiled_patterns.items():
             for pattern in compiled_patterns:
                 for match in pattern.finditer(text):
@@ -324,7 +345,7 @@ class RegexExtractor(BaseExtractor):
                         'end': match.end(),
                         'confidence': 1.0  # Regex matches are deterministic
                     })
-        
+
         return self.post_process_entities(entities)
 
 
@@ -351,7 +372,7 @@ class CompositeExtractor(BaseExtractor):
         super().__init__()
         self.extractors = extractors
     
-    def extract(self, text: str) -> List[Dict[str, Any]]:
+    def extract(self, text: str, task: Any = None) -> List[Dict[str, Any]]:
         """Extract entities using all configured extractors.
 
         Individual sub-extractor failures are tolerated (other extractors
@@ -366,7 +387,7 @@ class CompositeExtractor(BaseExtractor):
         for extractor in self.extractors:
             extractor_name = type(extractor).__name__
             try:
-                entities = extractor.extract(text)
+                entities = extractor.extract(text, task=task)
                 all_entities.extend(entities)
                 successes += 1
             except Exception as e:
@@ -432,14 +453,15 @@ class EntityRefiner:
         if self.model is None:
             self.model, self.tokenizer = model_manager.get_refinement_model()
     
-    def refine(self, entities: List[Dict[str, Any]], text: str) -> List[Dict[str, Any]]:
+    def refine(self, entities: List[Dict[str, Any]], text: str, task: Any = None) -> List[Dict[str, Any]]:
         """
         Refine generic entity labels to specific types.
-        
+
         Args:
             entities: List of entity dictionaries from NER extraction
             text: The original text (needed for context)
-            
+            task: Optional Task instance for recording AI calls.
+
         Returns:
             List of entities with refined labels. Non-refinable entities are passed through unchanged.
             Refined entities have 'original_label' field preserving the generic label.
@@ -456,11 +478,13 @@ class EntityRefiner:
         refinable_labels = set(refinement_config.get('refinable_labels', []))
         label_classes = refinement_config.get('label_classes', [])
         max_length = refinement_config.get('max_length', 2048)
-        
+        model_uri = refinement_config.get('model', 'refinement')
+
         refined_entities = []
         attempted = 0
         successes = 0
         errors: List[str] = []
+        total_duration = 0.0
         for entity in entities:
             # Only refine entities with refinable labels
             if entity['label'] not in refinable_labels:
@@ -473,29 +497,32 @@ class EntityRefiner:
                 entity_text = entity['text']
                 start_pos = entity['start']
                 end_pos = entity['end']
-                
+
                 # Create marked text with entity markers
                 marked_text = (
-                    text[:start_pos] + 
-                    f"[E] {entity_text} [/E]" + 
+                    text[:start_pos] +
+                    f"[E] {entity_text} [/E]" +
                     text[end_pos:]
                 )
-                
+
                 # Tokenize and predict
                 inputs = self.tokenizer(
-                    marked_text, 
-                    return_tensors="pt", 
-                    truncation=True, 
-                    max_length=max_length, 
+                    marked_text,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=max_length,
                     padding="max_length"
                 )
-                
+
+                start = time.monotonic()
                 with torch.no_grad():
                     outputs = self.model(**inputs)
-                
+                duration = time.monotonic() - start
+                total_duration += duration
+
                 # Get predicted class
                 pred_idx = torch.argmax(outputs.logits, dim=-1).item()
-                
+
                 # Map prediction to label
                 if pred_idx < len(label_classes):
                     refined_label = label_classes[pred_idx].upper()
@@ -516,6 +543,9 @@ class EntityRefiner:
                 self.logger.exception(f"Error refining entity '{entity['text']}'")
                 errors.append(f"{entity.get('text')!r}: {type(e).__name__}: {e}")
                 refined_entities.append(entity)
+
+        if task is not None and attempted > 0:
+            record_ml_call(task, "local", model_uri, total_duration)
 
         fail_if_no_successes(
             label="EntityRefiner.refine",

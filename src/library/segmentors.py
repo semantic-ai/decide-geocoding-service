@@ -1,5 +1,6 @@
 import re
 import asyncio
+import time
 from abc import ABC, abstractmethod
 from span_aligner import SpanAligner
 from typing import Optional, Any, Type, List, Dict
@@ -248,15 +249,16 @@ SEGMENTS:
 
 
     # Segmentation method
-    def segment(self, text: str) -> List[Dict[str, Any]]:
+    def segment(self, text: str, task: Any = None) -> List[Dict[str, Any]]:
         logger.info("Running Gemma segmentation...")
-        
+
         messages = [
             {"role": "system", "content": self.SYSTEM_INSTRUCTION},
             {"role": "user", "content": f"PUBLIC DECISION:\n```\n{text}\n```"},
         ]
-        
+
         generator = self.get_generator()
+        start = time.monotonic()
         output = generator(
             messages,
             max_new_tokens=self.max_new_tokens,
@@ -265,11 +267,16 @@ SEGMENTS:
             top_p=0.95,
             do_sample=True,
         )
-        
+        duration = time.monotonic() - start
+
+        if task is not None:
+            from decide_ai_service_base.ai_logging import record_ml_call
+            record_ml_call(task, "local", self.model_name, duration)
+
         raw_output = output[0]["generated_text"]
         fixed_output = self.fix_missing_tags(raw_output)
         _, segments = self.extract_entities_ner_style(fixed_output)
-        
+
         # Align derived segments to original source
         return self.align_segments(text, segments)
 
@@ -446,8 +453,11 @@ class LLMSegmentor(AbstractSegmentor):
             "text": segment.get("text", "")
         }
 
-    def segment(self, text: str) -> List[Dict[str, Any]]:
+    def segment(self, text: str, task: Any = None) -> List[Dict[str, Any]]:
         logger.info(f"Running LLM segmentation with {self.analyzer.model_name}...")
+
+        # Attach the current task so the analyzer logs the AI call (see record_llm_call).
+        self.analyzer._task = task
 
         try:
             result = self.analyzer.analyze_single_entry(
