@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional, List, Tuple
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import SystemMessage, HumanMessage
-from .retry import retry_call
+from ..retry import retry_call
 import json_repair
 from helpers import logger
 
@@ -178,8 +178,8 @@ class LLMAnalyzer:
             duration = time.monotonic() - start
 
             if self._task is not None:
-                from .ai_logging import record_llm_call
-                record_llm_call(self._task, self._endpoint, response, duration)
+                from decide_ai_service_base.ai_logging import record_llm_call
+                record_llm_call(self._task, self._endpoint, self.model_name, response, duration)
 
             result = self._parse_json(response.content)
 

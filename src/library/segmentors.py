@@ -270,7 +270,7 @@ SEGMENTS:
         duration = time.monotonic() - start
 
         if task is not None:
-            from ..ai_logging import record_ml_call
+            from decide_ai_service_base.ai_logging import record_ml_call
             record_ml_call(task, "local", self.model_name, duration)
 
         raw_output = output[0]["generated_text"]
@@ -456,6 +456,9 @@ class LLMSegmentor(AbstractSegmentor):
     def segment(self, text: str, task: Any = None) -> List[Dict[str, Any]]:
         logger.info(f"Running LLM segmentation with {self.analyzer.model_name}...")
 
+        # Attach the current task so the analyzer logs the AI call (see record_llm_call).
+        self.analyzer._task = task
+
         try:
             result = self.analyzer.analyze_single_entry(
                 text=text,
@@ -465,7 +468,6 @@ class LLMSegmentor(AbstractSegmentor):
                 text_limit=28000,
                 preprocess=True,
                 postprocess=True,
-                task=task,
             )
         except Exception as e:
             logger.exception("LLM segmentation failed")

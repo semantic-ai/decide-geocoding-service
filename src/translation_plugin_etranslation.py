@@ -333,7 +333,7 @@ class ETRanslationService(BaseTranslator):
         duration = time.time() - start
 
         if self._task is not None:
-            from .ai_logging import record_ml_call
+            from decide_ai_service_base.ai_logging import record_ml_call
             model_uri = "http://data.lblod.info/ontology/airo#etranslation"
             record_ml_call(self._task, self.config.base_url, model_uri, duration)
 

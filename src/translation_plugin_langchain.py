@@ -20,7 +20,7 @@ from helpers import logger
 
 from .config import get_config
 from .retry import retry_call
-from .ai_logging import record_llm_call
+from decide_ai_service_base.ai_logging import record_llm_call
 
 
 LANGUAGE_NAMES: Dict[str, str] = {

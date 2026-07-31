@@ -17,7 +17,7 @@ from .ner_models import model_manager
 from .ner_config import REGEX_PATTERNS, NER_MODELS, LABEL_MAPPINGS
 from .config import get_config
 from .helper_functions import fail_if_no_successes
-from .ai_logging import record_ml_call
+from decide_ai_service_base.ai_logging import record_ml_call
 import torch
 
 # Person-type labels produced by the extractors (HuggingFace -> MANDATARY, spaCy/Flair PER -> PERSON). Validation only applies to these; labels like DATE or LOCATION legitimately contain digits and must be left untouched.

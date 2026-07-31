@@ -235,7 +235,7 @@ class HuggingFaceTranslateService(BaseTranslator):
         duration = time.monotonic() - start
 
         if self._task is not None:
-            from .ai_logging import record_ml_call
+            from decide_ai_service_base.ai_logging import record_ml_call
             record_ml_call(self._task, "local", model_uri, duration)
 
         self.logger.info(f"Translation completed: {len(translation)} characters")
