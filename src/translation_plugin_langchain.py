@@ -157,7 +157,7 @@ class LangChainTranslateService(BaseTranslator):
 
         if self._task is not None:
             endpoint = self.config.base_url if self.config.base_url else self.config.provider
-            model_uri = f"{self.config.provider}:{self.config.model_name}"
+            model_uri = self.config.model_name
             record_llm_call(self._task, endpoint, model_uri, response, duration)
 
         translated = response.content.strip()
