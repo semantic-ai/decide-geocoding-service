@@ -51,6 +51,8 @@ class TranslationTask(DecisionTask):
             module = importlib.import_module(module_path, package=__package__)
             service_cls = getattr(module, class_name)
             service = service_cls()
+            # Attach the task to the service we own, so the plugin logs its AI call.
+            service.task = self
             self._translator = Translator(services_list=[service])
 
             logger.info("Translator initialized successfully")
@@ -403,13 +405,9 @@ class TranslationTask(DecisionTask):
                     f"Text is already in target language ({self.target_language}), skipping translation")
                 continue
 
-            # Get translator and translate
+            # Get translator and translate (the task is attached in get_translator,
+            # so the plugin logs its AI call)
             translator = self.get_translator()
-
-            # Attach task reference to underlying service(s) for AI call logging
-            for svc in getattr(translator, "services_list", []):
-                if hasattr(svc, "task"):
-                    svc.task = self
 
             logger.info(
                 f"Translating from {source_language} to {self.target_language}")
