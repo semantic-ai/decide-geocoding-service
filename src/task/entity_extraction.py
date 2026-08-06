@@ -198,20 +198,22 @@ class EntityExtractionTask(DecisionTask):
     def fetch_expression_data(self, expression_uri: str) -> str:
         """
         Retrieve the text content from a specific expression URI.
-        Similar to fetch_data() but for a specific expression.
+
+        Only epvoc:expressionContent, not title/description/decision_basis: this is
+        used as the projection target for spans extracted from the English translation,
+        and translation only ever covers expressionContent (see TranslationTask). Mixing
+        in the other fields would put the projection target text out of scope with the
+        text the spans were computed against, and with the offsets we'd be saving.
         """
         query_template = Template(
-            get_prefixes_for_query("eli", "eli-dl", "dct", "epvoc") +
+            get_prefixes_for_query("epvoc") +
             """
-            SELECT DISTINCT ?title ?description ?decision_basis ?content
+            SELECT DISTINCT ?content
             WHERE {
               GRAPH ?graph {
                 VALUES ?s {
                   $expression
                 }
-                OPTIONAL { ?s eli:title ?title }
-                OPTIONAL { ?s eli:description ?description }
-                OPTIONAL { ?s eli-dl:decision_basis ?decision_basis }
                 OPTIONAL { ?s epvoc:expressionContent ?content }
               }
             }
@@ -224,16 +226,9 @@ class EntityExtractionTask(DecisionTask):
         )
 
         bindings = query_result.get("results", {}).get("bindings", [])
-        texts: list[str] = []
-        seen = set()
-        for binding in bindings:
-            for field in ("content", "title", "description", "decision_basis"):
-                value = binding.get(field, {}).get("value")
-                if value and value not in seen:
-                    texts.append(value)
-                    seen.add(value)
-
-        return "\n".join(texts)
+        if bindings and "content" in bindings[0]:
+            return bindings[0]["content"].get("value", "")
+        return ""
 
     def fetch_eli_expressions(self) -> dict[str, list[str]]:
         """
@@ -381,7 +376,12 @@ class EntityExtractionTask(DecisionTask):
                 continue
 
             source_expression_uri, source_text = self.resolve_projection_context(target_expression_uri,translated_text=target_english_text)
-            if not source_text or source_expression_uri == target_expression_uri:
+            if source_expression_uri == target_expression_uri:
+                continue
+            if not source_text:
+                logger.warning(
+                    f"No source text available to project entities onto for {source_expression_uri}"
+                )
                 continue
 
             # Project already-formatted entities onto source text.
