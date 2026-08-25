@@ -70,7 +70,7 @@ SEGMENTS:
 ```
 ['TITLE', 'PARTICIPANTS', 'MOTIVATION', 'PREVIOUS_DECISIONS', 'LEGAL_FRAMEWORK', 'DECISION', 'VOTING', 'ARTICLE']
 ```"""
-    def __init__(self, api_key: str = None, base_url: str = None, model_name: str = "wdmuer/decide-marked-segmentation", temperature: float = 0.1, max_new_tokens: int = 4096):
+    def __init__(self, api_key: str = None, base_url: str = None, model_name: str = "lblod/decide-marked-segmentation", temperature: float = 0.1, max_new_tokens: int = 4096):
         super().__init__(api_key, base_url, model_name, temperature, max_new_tokens)
 
 

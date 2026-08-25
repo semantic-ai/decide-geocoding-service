@@ -123,7 +123,7 @@ class SegmentationTask(DecisionTask):
         seg_config = get_config().segmentation
         api_key = seg_config.llm.api_key.get_secret_value() if seg_config.llm.api_key else None
 
-        if seg_config.llm.model_name == "wdmuer/decide-marked-segmentation":
+        if seg_config.llm.model_name == "lblod/decide-marked-segmentation":
             return GemmaSegmentor(
                 api_key=api_key,
                 base_url=seg_config.llm.base_url,

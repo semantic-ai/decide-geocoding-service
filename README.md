@@ -129,7 +129,7 @@ Used by the `segmenting` task. Settings are split between top-level keys and the
 | `max_new_tokens` | `14000` | Generation budget for GemmaSegmentor; not used by LLMSegmentor |
 | `max_gap` | `5` | Maximum character gap allowed when projecting segments back to the source expression |
 | `llm.provider` | `ollama` | LangChain provider name (`ollama`, `openai`, `mistral`, …) |
-| `llm.model_name` | `mistral-nemo` | Model name. Set to `wdmuer/decide-marked-segmentation` to use the local GemmaSegmentor instead |
+| `llm.model_name` | `mistral-nemo` | Model name. Set to `lblod/decide-marked-segmentation` to use the local GemmaSegmentor instead |
 | `llm.api_key` | `null` | API key — required for external providers (OpenAI, Mistral, …) |
 | `llm.base_url` | `null` | Custom endpoint URL — required for Ollama and self-hosted models |
 | `llm.temperature` | `0.0` | Lower = more deterministic segmentation |
@@ -249,12 +249,12 @@ The segmentation task uses the LLM to tag document sections. The `segmentation.l
 }
 ```
 
-**GemmaSegmentor (legacy specialized model):** Set `llm.model_name` to `"wdmuer/decide-marked-segmentation"` to use the built-in transformers-based segmentor instead of the generic LLM approach:
+**GemmaSegmentor (legacy specialized model):** Set `llm.model_name` to `"lblod/decide-marked-segmentation"` to use the built-in transformers-based segmentor instead of the generic LLM approach:
 
 ```json
 "segmentation": {
   "llm": {
-    "model_name": "wdmuer/decide-marked-segmentation"
+    "model_name": "lblod/decide-marked-segmentation"
   },
   "max_new_tokens": 4000,
   "max_gap": 5
