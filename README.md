@@ -7,7 +7,7 @@ Location extraction uses the RobBERT NER model (Ghent-focused). Entity extractio
 ## Features
 
 - **Location extraction**: CITY, DOMAIN, HOUSENUMBERS, INTERSECTION, POSTCODE, PROVINCE, ROAD, STREET (Ghent-focused, geocoded via Nominatim)
-  - Model: [svercoutere/RoBERTa-NER-BE-Loc](https://huggingface.co/svercoutere/RoBERTa-NER-BE-Loc)
+  - Model: [lblod/RoBERTa-NER-BE-Loc](https://huggingface.co/lblod/RoBERTa-NER-BE-Loc)
 - **Legal entities**: DATE, LOCATION, LEGAL_GROUND, ADMINISTRATIVE_BODY, MANDATARY (HuggingFace, default composite method)
   - Model: [lblod/multilingual-ner-abb-improved](https://huggingface.co/lblod/multilingual-ner-abb-improved)
 - **Refined types**: Dates (publication_date, session_date, etc.) and locations (impact_location, context_location). The model can also output `legal_date`, but this label is intentionally filtered out and not processed further.
