@@ -44,13 +44,13 @@ Secrets must be placed in environment variables. See also `docker-compose.yml`. 
 ```
 # translation
 # When translation provider is etranslation, this bearer token will be used for authentication
-TRANSLATION__ETRANSLATION__BEARER_TOKEN: "SECRET" 
+TRANSLATION__ETRANSLATION__BEARER_TOKEN: "SECRET"
 # When translation provider is etranslation and bearer token is not set or empty, this password (in combination with the username) will be used for authentication
-TRANSLATION__ETRANSLATION__PASSWORD: "SECRET" 
+TRANSLATION__ETRANSLATION__PASSWORD: "SECRET"
 
 # segmentation
 # API key for the segmentation LLM provider (OpenAI, Mistral...)
-SEGMENTATION__LLM__API_KEY: "SECRET" 
+SEGMENTATION__LLM__API_KEY: "SECRET"
 ```
 
 ---
@@ -313,7 +313,7 @@ Ensure the required Docker network exists (see `docker-compose.yaml`).
 
 **Ports**: Service runs on port 80 internally. Map to host port in `docker-compose.yaml` (default: `8082:80`). For production, expose via dispatcher instead of opening ports directly.
 
-**Volumes**: 
+**Volumes**:
 - `config.json` mounted read-only
 - `nominatim-data` for Nominatim database persistence
 

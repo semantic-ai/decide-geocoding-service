@@ -26,14 +26,14 @@ except ImportError:
 
 class AbstractSegmentor(ABC):
     """Abstract base class for a segmentation strategy."""
-    
+
     def __init__(self, api_key: str = None, base_url: str = None, model_name: str = None, temperature: float = 0.1, max_new_tokens: int = 2000):
         self.api_key = api_key
         self.base_url = base_url
         self.model_name = model_name
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
-    
+
     @abstractmethod
     def segment(self, text: str) -> List[Dict[str, Any]]:
         """
@@ -72,16 +72,16 @@ SEGMENTS:
 ```"""
     def __init__(self, api_key: str = None, base_url: str = None, model_name: str = "wdmuer/decide-marked-segmentation", temperature: float = 0.1, max_new_tokens: int = 4096):
         super().__init__(api_key, base_url, model_name, temperature, max_new_tokens)
-   
+
 
     def get_generator(self):
         """Lazy-load the segmentation model using config settings."""
         if self.__class__._generator is None:
             if transformers_pipeline is None:
                 raise ImportError("transformers library or pipeline not available")
-            
+
             logger.info(f"Loading segmentation model: {self.model_name}")
-            
+
             self.__class__._generator = transformers_pipeline(
                 "text-generation",
                 model=self.model_name,
@@ -173,23 +173,23 @@ SEGMENTS:
         The returned offsets are relative to `clean_text` (tagged_text with tags removed).
         """
         TAG_PATTERN = re.compile(r"<(/?)([A-Za-z0-9_]+)>")
-        
+
         entities = []
         clean_parts = []
         clean_pos = 0
-        
+
         open_tags: list[tuple[str, int]] = []
-        
+
         last_end = 0
         for match in TAG_PATTERN.finditer(tagged_text):
             # Add text before this tag to clean output
             text_before = tagged_text[last_end:match.start()]
             clean_parts.append(text_before)
             clean_pos += len(text_before)
-            
+
             is_closing = match.group(1) == "/"
             tag_name = match.group(2)
-            
+
             if not is_closing:
                 # Opening tag - record start position
                 open_tags.append((tag_name, clean_pos))
@@ -206,21 +206,21 @@ SEGMENTS:
                         })
                         open_tags.pop(i)
                         break
-            
+
             last_end = match.end()
-        
+
         # Add remaining text after last tag
         clean_parts.append(tagged_text[last_end:])
         clean_text = "".join(clean_parts)
-        
+
         # Populate the 'text' field for each entity
         for entity in entities:
             entity["text"] = clean_text[entity["start"]:entity["end"]]
             del entity["_temp_end"]
-        
+
         # Sort entities by start position
         entities.sort(key=lambda x: x["start"])
-        
+
         return clean_text, entities
 
     def align_segments(self, source_text: str, segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -232,7 +232,7 @@ SEGMENTS:
             text = seg.get('text', '').strip()
             if len(text) < 3:
                 continue
-            
+
             pos = source_text.find(text)
             if pos >= 0:
                 aligned_segments.append({
@@ -243,7 +243,7 @@ SEGMENTS:
                 })
             else:
                 logger.warning(f"Could not find '{seg['label']}' in source: {text[:50]}...")
-        
+
         logger.info(f"Aligned {len(aligned_segments)}/{len(segments)} segments to source")
         return aligned_segments
 
@@ -445,7 +445,7 @@ class LLMSegmentor(AbstractSegmentor):
         )
 
     def format_segment(self, segment: Dict[str, Any]) -> Dict[str, Any]:
-        
+
         return {
             "label": segment.get("labels", [])[0] if segment.get("labels") else "UNKNOWN",
             "start": segment.get("start", 0),
@@ -493,4 +493,3 @@ class LLMSegmentor(AbstractSegmentor):
             span_map=self.LABEL_MAPPING
         )
         return [self.format_segment(span) for span in annotations.get("spans", [])]
-

@@ -210,7 +210,7 @@ class SegmentationTask(DecisionTask):
             GRAPH {sparql_escape_uri(GRAPHS["expressions"])} {{
                 ?expression a eli:Expression ;
                             epvoc:expressionContent ?content .
-            }}            
+            }}
             }}
             """
         ).substitute(task=sparql_escape_uri(self.task_uri))

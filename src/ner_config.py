@@ -30,7 +30,7 @@ NER_MODELS = {
         # Mapping from model output indices to refined labels
         'label_classes': [
             'context_date',
-            'context_location', 
+            'context_location',
             'context_period',
             'entry_date',
             'expiry_date',
@@ -96,7 +96,7 @@ LABEL_MAPPINGS = {
         'PER': 'PERSON',
         'ORG': 'ORGANIZATION',
         'LOC': 'LOCATION',
-        'GPE': 'LOCATION', 
+        'GPE': 'LOCATION',
         'MISC': 'MISCELLANEOUS',
     },
     'flair': {
@@ -104,6 +104,6 @@ LABEL_MAPPINGS = {
         'ORG': 'ORGANIZATION',
         'LOC': 'LOCATION',
     },
-    'huggingface': {}, 
+    'huggingface': {},
     'regex': {},
 }
