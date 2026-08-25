@@ -18,12 +18,12 @@ NER_MODELS = {
         'nl': 'flair/ner-dutch'
     },
     'huggingface': {
-        'nl': 'PedroDKE/multilingual-ner-abb-improved',
-        'en': 'PedroDKE/multilingual-ner-abb-improved',
+        'nl': 'lblod/multilingual-ner-abb-improved',
+        'en': 'lblod/multilingual-ner-abb-improved',
         'aggregation_strategy': 'simple'
     },
     'refinement': {
-        'model': 'svercoutere/longformer-classifier-refinement-abb',
+        'model': 'lblod/longformer-classifier-refinement-abb',
         'max_length': 2048,
         # Labels that can be refined by the model
         'refinable_labels': ['DATE', 'LOCATION', 'LOC', 'GPE'],
