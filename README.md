@@ -254,7 +254,8 @@ The segmentation task uses the LLM to tag document sections. The `segmentation.l
 ```json
 "segmentation": {
   "llm": {
-    "model_name": "lblod/decide-marked-segmentation"
+    "model_name": "lblod/decide-marked-segmentation",
+    "temperature": 0.1
   },
   "max_new_tokens": 4000,
   "max_gap": 5
