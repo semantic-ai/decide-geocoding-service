@@ -199,7 +199,7 @@ Add the `translation.langchain` block to `config.json`:
 ```json
 "langchain": {
   "provider": "mistralai",
-  "model_name": "mistral-small-latest",
+  "model_name": "mistral-medium-3-5",
   "temperature": 0.1
 }
 ```
