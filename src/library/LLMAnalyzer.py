@@ -15,7 +15,7 @@ MARKER_RE = re.compile(r'^L(\d+)\| ?')
 class LLMAnalyzer:
     """
     Analyzer that routes LLM calls through LangChain's init_chat_model factory.
-    Supports any provider recognised by LangChain (openai, ollama, mistral, …)
+    Supports any provider recognised by LangChain (ollama, mistral, …)
     purely through configuration — no if/else branching.
     """
 
