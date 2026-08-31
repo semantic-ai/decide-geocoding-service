@@ -12,7 +12,7 @@ Location extraction uses the RobBERT NER model (Ghent-focused). Entity extractio
   - Model: [lblod/multilingual-ner-abb-improved](https://huggingface.co/lblod/multilingual-ner-abb-improved)
 - **Refined types**: Dates (publication_date, session_date, etc.) and locations (impact_location, context_location). The model can also output `legal_date`, but this label is intentionally filtered out and not processed further.
   - Model: [lblod/longformer-classifier-refinement-abb](https://huggingface.co/lblod/longformer-classifier-refinement-abb)
-- **Translation**: LangChain (Ollama, OpenAI, Mistral, …), HuggingFace, eTranslation (EU)
+- **Translation**: LangChain (Ollama, Mistral, …), HuggingFace, eTranslation (EU)
 - **Storage**: All annotations stored in SPARQL triplestore with full provenance
 
 ## Requirements
@@ -49,7 +49,7 @@ TRANSLATION__ETRANSLATION__BEARER_TOKEN: "SECRET"
 TRANSLATION__ETRANSLATION__PASSWORD: "SECRET"
 
 # segmentation
-# API key for the segmentation LLM provider (OpenAI, Mistral...)
+# API key for the segmentation LLM provider (Mistral, ...)
 SEGMENTATION__LLM__API_KEY: "SECRET"
 ```
 
@@ -86,8 +86,8 @@ Used by the `translating` task.
 
 | Key | Values / Default | Effect |
 |---|---|---|
-| `target_language` | `en`, `nl`, `de`, `fr`, `es` | Language to translate into |
-| `provider` | `langchain` *(default)*, `huggingface`, `etranslation` | Which translation backend to use. `huggingface` runs locally (Helsinki-NLP OPUS-MT, no credentials needed). `etranslation` uses the EU Commission API (requires credentials). `langchain` delegates to a configurable LLM backend (e.g. Ollama, OpenAI, Mistral) |
+g| `target_language` | `en`, `nl`, `de`, `fr`, `es` | Language to translate into |
+| `provider` | `langchain` *(default)*, `huggingface`, `etranslation` | Which translation backend to use. `huggingface` runs locally (Helsinki-NLP OPUS-MT, no credentials needed). `etranslation` uses the EU Commission API (requires credentials). `langchain` delegates to a configurable LLM backend (e.g. Ollama or Mistral) |
 
 **`etranslation` sub-keys** (only relevant when `provider` is `etranslation`):
 
@@ -115,8 +115,8 @@ Used by `entity-extracting` (title extraction) and `model-annotating` (SDG class
 
 | Key | Default | Effect |
 |---|---|---|
-| `model_name` | `gpt-4o-mini` | OpenAI-compatible model name |
-| `api_key` | `null` | Required for external providers (OpenAI, Mistral, …) |
+| `model_name` | `mistral-nemo` | Mistral-compatible model name |
+| `api_key` | `null` | Required for external providers such as Mistral |
 | `temperature` | `0.1` | Lower = more deterministic output |
 
 ---
@@ -128,9 +128,9 @@ Used by the `segmenting` task. Settings are split between top-level keys and the
 |---|---|---|
 | `max_new_tokens` | `14000` | Generation budget for GemmaSegmentor; not used by LLMSegmentor |
 | `max_gap` | `5` | Maximum character gap allowed when projecting segments back to the source expression |
-| `llm.provider` | `ollama` | LangChain provider name (`ollama`, `openai`, `mistral`, …) |
+| `llm.provider` | `ollama` | LangChain provider name (`ollama`, `mistral`, …) |
 | `llm.model_name` | `mistral-nemo` | Model name. Set to `lblod/decide-marked-segmentation` to use the local GemmaSegmentor instead |
-| `llm.api_key` | `null` | API key — required for external providers (OpenAI, Mistral, …) |
+| `llm.api_key` | `null` | API key — required for external providers such as Mistral |
 | `llm.base_url` | `null` | Custom endpoint URL — required for Ollama and self-hosted models |
 | `llm.temperature` | `0.0` | Lower = more deterministic segmentation |
 
@@ -138,13 +138,13 @@ Used by the `segmenting` task. Settings are split between top-level keys and the
 
 ### LLM Configuration: Translation & Segmentation
 
-Both **translation** (via `langchain` provider) and **segmentation** delegate to an LLM backend. The system is designed to work with any LangChain-supported provider - local (Ollama) or remote (OpenAI, Mistral, etc.) - with no code changes required. Switch providers by updating `config.json`.
+Both **translation** (via `langchain` provider) and **segmentation** delegate to an LLM backend. The system is designed to work with any LangChain-supported provider - local (Ollama) or remote (Mistral, etc.) - with no code changes required. Switch providers by updating `config.json`.
 
 #### Shared `llm` sub-keys
 
 | Key | Default | Effect                                                                                                         |
 |---|---|----------------------------------------------------------------------------------------------------------------|
-| `provider` | `ollama` | LangChain provider name: `ollama`, `openai`, `mistralai`, `anthropic`, …                                       |
+| `provider` | `ollama` | LangChain provider name: `ollama`, `mistralai`, …                                       |
 | `model_name` | varies | Model identifier as understood by the provider                                                                 |
 | `api_key` | `null` | API key - required for remote providers. **Never commit to config.json**; use the environment variable instead |
 | `base_url` | `null` | Custom endpoint - required for Ollama/self-hosted; optional for providers with a default endpoint              |
@@ -186,15 +186,6 @@ Add the `translation.langchain` block to `config.json`:
 }
 ```
 
-**Example — OpenAI:**
-```json
-"langchain": {
-  "provider": "openai",
-  "model_name": "gpt-4o-mini",
-  "temperature": 0.1
-}
-```
-
 **Example — Mistral AI:**
 ```json
 "langchain": {
@@ -215,19 +206,6 @@ The segmentation task uses the LLM to tag document sections. The `segmentation.l
     "provider": "ollama",
     "model_name": "mistral-nemo",
     "base_url": "http://ollama:11434",
-    "temperature": 0.0
-  },
-  "max_new_tokens": 20000,
-  "max_gap": 5
-}
-```
-
-**Example - OpenAI:**
-```json
-"segmentation": {
-  "llm": {
-    "provider": "openai",
-    "model_name": "gpt-4.1",
     "temperature": 0.0
   },
   "max_new_tokens": 20000,

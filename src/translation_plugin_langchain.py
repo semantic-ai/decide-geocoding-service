@@ -2,7 +2,7 @@
 LangChain Translation Plugin for translatepy.
 
 Provider-agnostic LLM translation using LangChain's init_chat_model factory.
-Supports any LangChain-compatible provider (ollama, openai, mistral, …)
+Supports any LangChain-compatible provider (ollama, mistral, …)
 by setting config.translation.langchain.provider in config.json.
 """
 
