@@ -119,7 +119,7 @@ def _annotate(task,subject: str, predicate: str, obj: str, source_uri: str, enti
         source_uri=source_uri,
         start=entity.get("start"),
         end=entity.get("end"),
-        agent=get_agent_uri("ner_extractor"),
+        agent=get_agent_uri("http://lblod.data.gift/id/components/entity-extraction/v1.0.0"),
         agent_type=AGENT_TYPES["ai_component"],
         confidence=entity.get("confidence", 1.0),
     ).add_to_triplestore_if_not_exists()

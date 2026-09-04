@@ -24,6 +24,7 @@ from .dedup import get_existing_annotations
 # Instantiate a single EntityFormatter to reuse across tasks.
 entity_formatter = EntityFormatter()
 
+EXTRACTOR_COMPONENT = "http://lblod.data.gift/id/components/entity-extraction/v1.0.0"
 
 class EntityExtractionTask(DecisionTask):
     """Task that extracts named entities from text."""
@@ -51,7 +52,7 @@ class EntityExtractionTask(DecisionTask):
             source_uri=source_uri,
             start=None,
             end=None,
-            agent=get_agent_uri("ner_extractor"),
+            agent=get_agent_uri(EXTRACTOR_COMPONENT),
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore_if_not_exists()
 
@@ -324,7 +325,7 @@ class EntityExtractionTask(DecisionTask):
         # Expressions that already have entity annotations were processed
         # before; reuse those annotations instead of re-extracting
         already_extracted = get_existing_annotations(
-            expression_uris, get_agent_uri("ner_extractor"))
+            expression_uris, get_agent_uri(EXTRACTOR_COMPONENT))
         if already_extracted:
             logger.info(
                 f"{len(already_extracted)} of {len(expression_uris)} "

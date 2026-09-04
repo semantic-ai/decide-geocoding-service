@@ -19,6 +19,8 @@ from decide_ai_service_base.annotation import RelationExtractionAnnotation
 from ..config import get_config
 from .dedup import get_existing_translations
 
+TRANSLATION_COMPONENT = "http://lblod.data.gift/id/components/translation/v1.0.0"
+
 
 class TranslationTask(DecisionTask):
     """Task that translates text to a target language using a configurable translation provider."""
@@ -145,7 +147,7 @@ class TranslationTask(DecisionTask):
             source_uri=source_uri,
             start=None,
             end=None,
-            agent=get_agent_uri("translator"),
+            agent=get_agent_uri(TRANSLATION_COMPONENT),
             agent_type=AGENT_TYPES["ai_component"]
         ).add_to_triplestore_if_not_exists()
 
@@ -211,7 +213,7 @@ class TranslationTask(DecisionTask):
                 source_uri=source_expression_uri,
                 start=None,
                 end=None,
-                agent=get_agent_uri("translator"),
+                agent=get_agent_uri(TRANSLATION_COMPONENT),
                 agent_type=AGENT_TYPES["ai_component"],
             ).add_to_triplestore_if_not_exists()
 
