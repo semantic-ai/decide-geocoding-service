@@ -16,6 +16,7 @@ from ..config import get_config
 from ..library.entity_projections import project_spans
 from .dedup import get_existing_annotations
 
+SEGMENTATION_COMPONENT = "http://lblod.data.gift/id/components/segmentation/v1.0.0"
 
 class SegmentationTask(DecisionTask):
     """Run the marked segmentation model and store segment spans as annotations."""
@@ -174,7 +175,7 @@ class SegmentationTask(DecisionTask):
                 source_uri=source_uri,
                 start=segment.get('start'),
                 end=segment.get('end'),
-                agent=get_agent_uri("segmenter"),
+                agent=get_agent_uri(SEGMENTATION_COMPONENT),
                 agent_type=AGENT_TYPES["ai_component"],
                 confidence=1.0
             ).add_to_triplestore_if_not_exists()
@@ -277,7 +278,7 @@ class SegmentationTask(DecisionTask):
         # Expressions that already have segment annotations were processed
         # before; skip re-segmenting those
         already_segmented = get_existing_annotations(
-            expression_uris, get_agent_uri("segmenter"))
+            expression_uris, get_agent_uri(SEGMENTATION_COMPONENT))
         if already_segmented:
             logger.info(
                 f"{len(already_segmented)} of {len(expression_uris)} "
