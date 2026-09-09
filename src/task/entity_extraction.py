@@ -1,13 +1,14 @@
 import uuid
 from typing import Optional, Any
 
+import langdetect
 from helpers import query, update
 from string import Template
 from escape_helpers import sparql_escape_uri, sparql_escape_string
 from helpers import logger
 
 from decide_ai_service_base.task import DecisionTask
-from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, TASK_OPERATIONS, AGENT_TYPES, LANGUAGE_CODE_TO_URI
+from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, TASK_OPERATIONS, AGENT_TYPES, LANGUAGE_CODE_TO_URI, LANGUAGE_URI_TO_CODE, SPARQL_PREFIXES
 from decide_ai_service_base.util import (
     get_agent_uri
 )
@@ -135,6 +136,57 @@ class EntityExtractionTask(DecisionTask):
 
         return entities
 
+    def resolve_extraction_language(
+            self,
+            expression_uri: str,
+            language_uri: Optional[str],
+            content: Optional[str],
+            is_translation: bool,
+    ) -> str:
+        """
+        Determine which language the expression's text is written in.
+
+        Args:
+            expression_uri: The expression whose text is about to be analysed.
+            language_uri: Value of the expression's eli:language, if recorded.
+            content: The text, used for detection when no language is recorded.
+            is_translation: Whether this expression is a translation of another.
+
+        Returns:
+            Language code (e.g. 'nl', 'de', 'en').
+
+        Raises:
+            RuntimeError: If the language cannot be determined.
+        """
+        if is_translation:
+            return get_config().translation.target_language.lower()
+
+        if language_uri:
+            language_code = LANGUAGE_URI_TO_CODE.get(language_uri)
+            if language_code:
+                return language_code.lower()
+            logger.warning(
+                f"Unknown language URI '{language_uri}' on {expression_uri}, "
+                f"falling back to detection")
+
+        if not content or not content.strip():
+            raise RuntimeError(
+                f"Cannot determine the language of {expression_uri}: "
+                f"no eli:language recorded and no content to detect it from"
+            )
+
+        # Limit text length for detection to avoid hanging on very long text
+        try:
+            detected_language = langdetect.detect(content[:1000])
+        except Exception as e:
+            raise RuntimeError(
+                f"Cannot determine the language of {expression_uri}: "
+                f"no eli:language recorded and detection failed "
+                f"(content length={len(content)}): {e}"
+            ) from e
+
+        return detected_language
+
     def fetch_english_expression_uri(self) -> Optional[str]:
         """
         Find the English expression that realizes the same work as the source expression.
@@ -234,29 +286,42 @@ class EntityExtractionTask(DecisionTask):
     def fetch_eli_expressions(self) -> dict[str, list[str]]:
         """
         Retrieve the ELI expressions and their contents from the task's input container.
-        Note that these will be the translated expressions.
+        These are the translated expressions when the pipeline translated them, and
+        the original ones when it did not, so look in the job's target graph as well
+        as in the configured graphs.
 
         Returns:
             Dictionary containing:
                 - "expression_uris": list containing the expression URIs
                 - "expression_contents": list containing the expression contents
+                - "language_uris": list containing the eli:language URIs, if recorded
+                - "is_translation": whether the expression is a translation of another
         """
         q = Template(
-            get_prefixes_for_query("task", "epvoc", "eli") +
+            get_prefixes_for_query("task", "epvoc", "eli", "dct", "ext") +
             f"""
-            SELECT ?expression ?content WHERE {{
+            SELECT DISTINCT ?expression ?content ?lang ?translationSource WHERE {{
             GRAPH {sparql_escape_uri(GRAPHS["jobs"])} {{
                 $task task:inputContainer ?container .
+                $task dct:isPartOf ?job .
             }}
 
             GRAPH {sparql_escape_uri(GRAPHS["data_containers"])} {{
                 ?container task:hasResource ?expression .
             }}
 
-            GRAPH {sparql_escape_uri(GRAPHS["expressions"])} {{
+            {{ ?job ext:graphForTargets ?expressionGraph }}
+            UNION
+            {{ BIND({sparql_escape_uri(GRAPHS["expressions"])} AS ?expressionGraph) }}
+            GRAPH ?expressionGraph {{
                 ?expression a eli:Expression ;
                             epvoc:expressionContent ?content .
-            }}            
+                OPTIONAL {{ ?expression eli:language ?lang }}
+            }}
+
+            OPTIONAL {{ GRAPH {sparql_escape_uri(GRAPHS["ai"])} {{
+                ?translationSource {sparql_escape_uri(SPARQL_PREFIXES["linguistics_translations"])} ?expression .
+            }} }}
             }}
             """
         ).substitute(
@@ -269,15 +334,24 @@ class EntityExtractionTask(DecisionTask):
                 f"No expressions found in input container for task {self.task_uri}")
             return {
                 "expression_uris": [],
-                "expression_contents": []
+                "expression_contents": [],
+                "language_uris": [],
+                "is_translation": []
             }
 
         expression_uris = [b["expression"]["value"] for b in bindings]
         expression_contents = [b["content"]["value"] for b in bindings]
+        # Optional: absent for translated expressions, which record their language
+        # as a TripletAnnotation instead of a direct eli:language triple.
+        language_uris = [b.get("lang", {}).get("value") for b in bindings]
+        # A bound source means some expression was translated into this one.
+        is_translation = [bool(b.get("translationSource")) for b in bindings]
 
         return {
             "expression_uris": expression_uris,
-            "expression_contents": expression_contents
+            "expression_contents": expression_contents,
+            "language_uris": language_uris,
+            "is_translation": is_translation
         }
 
     def create_output_container(self, resource: str) -> str:
@@ -333,7 +407,9 @@ class EntityExtractionTask(DecisionTask):
 
         for i in range(len(expression_uris)):
             target_expression_uri = expression_uris[i]
-            target_english_text = eli_expressions["expression_contents"][i]
+            target_text = eli_expressions["expression_contents"][i]
+            target_language_uri = eli_expressions["language_uris"][i]
+            target_is_translation = eli_expressions["is_translation"][i]
 
             if target_expression_uri in already_extracted:
                 logger.info(
@@ -350,16 +426,23 @@ class EntityExtractionTask(DecisionTask):
             logger.info(
                 f"Processing entity extraction for source: {target_expression_uri}")
 
-            if not target_english_text or not target_english_text.strip():
+            if not target_text or not target_text.strip():
                 logger.warning(
                     f"No content available for entity extraction on {target_expression_uri}"
                 )
                 skipped_empty += 1
                 continue
 
-            # Extract general entities (DATE, etc.) on the English text
+            language = self.resolve_extraction_language(
+                target_expression_uri,
+                target_language_uri,
+                target_text,
+                target_is_translation,
+            )
+
+            # Extract general entities (DATE, etc.) in the language of the text
             general_entities = self.extract_general_entities(
-                target_english_text, language="en")
+                target_text, language=language)
 
             # Format entities: parse dates/periods and split locations into individual entities.
             # This adds structured 'formatted' fields to each entity.
@@ -372,13 +455,14 @@ class EntityExtractionTask(DecisionTask):
                 self.results_container_uris.append(
                     self.create_output_container(entity_uri))
 
-            # Projection back to original/source expression
-            if not general_entities_formatted:
+            # Projection back to original/source expression only needed when
+            # the input was a translation; an untranslated original was already
+            # annotated directly above.
+            if not general_entities_formatted or not target_is_translation:
                 continue
 
-            source_expression_uri, source_text = self.resolve_projection_context(target_expression_uri,translated_text=target_english_text)
-            if source_expression_uri == target_expression_uri:
-                continue
+            source_expression_uri, source_text = self.resolve_projection_context(
+                target_expression_uri, translated_text=target_text)
             if not source_text:
                 logger.warning(
                     f"No source text available to project entities onto for {source_expression_uri}"
@@ -386,7 +470,7 @@ class EntityExtractionTask(DecisionTask):
                 continue
 
             # Project already-formatted entities onto source text.
-            general_entities_projected = project_spans(target_english_text, source_text, general_entities_formatted)
+            general_entities_projected = project_spans(target_text, source_text, general_entities_formatted)
 
             logger.info(f"[extraction]: {general_entities_formatted}")
             logger.info(f"[projection]: {general_entities_projected}")

@@ -189,7 +189,9 @@ class SegmentationTask(DecisionTask):
     def fetch_eli_expressions(self) -> dict[str, list[str]]:
         """
         Retrieve the ELI expressions and their contents from the task's input container.
-        Note that these will be the translated expressions.
+        These are the translated expressions when the pipeline translated them, and
+        the original ones when it did not, so look in the job's target graph as well
+        as in the configured graphs.
 
         Returns:
             Dictionary containing:
@@ -197,18 +199,22 @@ class SegmentationTask(DecisionTask):
                 - "expression_contents": list containing the expression contents
         """
         q = Template(
-            get_prefixes_for_query("task", "epvoc", "eli") +
+            get_prefixes_for_query("task", "epvoc", "eli", "dct", "ext") +
             f"""
-            SELECT ?expression ?content WHERE {{
+            SELECT DISTINCT ?expression ?content WHERE {{
             GRAPH {sparql_escape_uri(GRAPHS["jobs"])} {{
                 $task task:inputContainer ?container .
+                $task dct:isPartOf ?job .
             }}
 
             GRAPH {sparql_escape_uri(GRAPHS["data_containers"])} {{
                 ?container task:hasResource ?expression .
             }}
 
-            GRAPH {sparql_escape_uri(GRAPHS["expressions"])} {{
+            {{ ?job ext:graphForTargets ?expressionGraph }}
+            UNION
+            {{ BIND({sparql_escape_uri(GRAPHS["expressions"])} AS ?expressionGraph) }}
+            GRAPH ?expressionGraph {{
                 ?expression a eli:Expression ;
                             epvoc:expressionContent ?content .
             }}
@@ -286,7 +292,7 @@ class SegmentationTask(DecisionTask):
 
         for i in range(len(expression_uris)):
             target_expression_uri = expression_uris[i]
-            target_english_text = eli_expressions["expression_contents"][i]
+            target_text = eli_expressions["expression_contents"][i]
 
             if target_expression_uri in already_segmented:
                 logger.info(
@@ -300,7 +306,7 @@ class SegmentationTask(DecisionTask):
             logger.info(
                 f"Processing segmentation for {target_expression_uri}")
 
-            if not target_english_text or not target_english_text.strip():
+            if not target_text or not target_text.strip():
                 logger.warning(
                     f"No content available for segmentation on {target_expression_uri}"
                 )
@@ -309,7 +315,7 @@ class SegmentationTask(DecisionTask):
 
             # Segment English text
             segmentor = self._create_segmentor()
-            segments = segmentor.segment(target_english_text, task=self)
+            segments = segmentor.segment(target_text, task=self)
 
             # Explicitly exclude title segments as this is already done in PDF content extraction service
             segments = [segment for segment in segments if segment["label"].lower() != "title"]
@@ -330,7 +336,7 @@ class SegmentationTask(DecisionTask):
 
             source_expression_uri, source_text = self.resolve_projection_context(
                 target_expression_uri,
-                translated_text=target_english_text,
+                translated_text=target_text,
             )
             if source_expression_uri == target_expression_uri:
                 continue
@@ -341,7 +347,7 @@ class SegmentationTask(DecisionTask):
                 continue
 
             projected_segments = project_spans(
-                target_english_text,
+                target_text,
                 source_text,
                 segments,
                 max_gap=get_config().segmentation.max_gap,
