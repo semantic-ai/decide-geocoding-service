@@ -24,7 +24,7 @@ NER_MODELS = {
     },
     'refinement': {
         'model': 'lblod/longformer-classifier-refinement-abb',
-        'max_length': 2048,
+        'max_length': 4096,
         # Labels that can be refined by the model
         'refinable_labels': ['DATE', 'LOCATION', 'LOC', 'GPE'],
         # Mapping from model output indices to refined labels

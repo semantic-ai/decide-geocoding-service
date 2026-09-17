@@ -428,6 +428,95 @@ def create_english_composite_extractor() -> CompositeExtractor:
         LanguageRegexExtractor('en')  # Will be empty unless patterns are added
     ])
 
+# Refined labels each generic label may be refined into.
+_DATES = {'CONTEXT_DATE', 'CONTEXT_PERIOD', 'ENTRY_DATE', 'EXPIRY_DATE',
+          'LEGAL_DATE', 'PUBLICATION_DATE', 'SESSION_DATE', 'VALIDITY_PERIOD'}
+_LOCATIONS = {'CONTEXT_LOCATION', 'IMPACT_LOCATION'}
+POSSIBLE_REFINEMENTS = {'DATE': _DATES, 'LOCATION': _LOCATIONS,
+                        'LOC': _LOCATIONS, 'GPE': _LOCATIONS}
+
+
+def _select_window(
+    total_len: int,
+    marker_start: int,
+    marker_end: int,
+    budget: int,
+    before_ratio: float = 0.8,
+) -> tuple[int, int]:
+    """Window around [marker_start, marker_end] that fits in budget tokens.
+
+    Args:
+        total_len: length of the token list the markers sits in.
+        marker_start: 0-based index of the [E] token.
+        marker_end: 0-based index of the [/E] token.
+        budget: max tokens the returned window may span.
+        before_ratio: desired ratio of tokens placed before the [E] start marker.
+
+    Returns:
+        (window_start, window_end) spanning at most budget tokens and
+        including the markers.
+    """
+    marker_len = marker_end - marker_start + 1
+    if marker_len > budget:
+        # Marker itself wider than the budget - shouldn't happen in
+        # practice, but avoid returning an invalid window.
+        return marker_start, min(total_len, marker_start + budget)
+
+    ideal_start = marker_start - int((budget - marker_len) * before_ratio)
+    window_start = max(0, min(ideal_start, total_len - budget))
+    return window_start, window_start + budget
+
+
+def _tokenize_for_refinement(tokenizer, marked_text: str, max_length: int) -> Dict[str, Any]:
+    """Tokenize marked_text for the refinement model, keeping [E]/[/E] visible.
+
+    Args:
+        tokenizer: the refinement model's tokenizer.
+        marked_text: text with [E]/[/E] wrapped around the entity.
+        max_length: max tokens the model accepts.
+
+    Returns:
+        Tokenizer output at its natural length,
+        windowed around the markers if the text doesn't fit.
+    """
+    full_ids = tokenizer(marked_text, truncation=False)["input_ids"]
+
+    if len(full_ids) <= max_length:
+        return tokenizer(
+            marked_text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=max_length,
+            padding=False,
+        )
+
+    e_id = tokenizer.convert_tokens_to_ids("[E]")
+    slash_e_id = tokenizer.convert_tokens_to_ids("[/E]")
+    cls_id, sep_id = full_ids[0], full_ids[-1]
+    body = full_ids[1:-1]
+
+    try:
+        marker_start = body.index(e_id)
+        marker_end = body.index(slash_e_id, marker_start + 1)
+    except ValueError:
+        return tokenizer(
+            marked_text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=max_length,
+            padding=False,
+        )
+
+    budget = max_length - 2  # room for CLS + SEP
+    window_start, window_end = _select_window(len(body), marker_start, marker_end, budget)
+    window_ids = [cls_id] + body[window_start:window_end] + [sep_id]
+
+    return {
+        "input_ids": torch.tensor([window_ids]),
+        "attention_mask": torch.tensor([[1] * len(window_ids)]),
+    }
+
+
 class EntityRefiner:
     """
     Refines generic entity labels to specific types using a Longformer classifier.
@@ -505,14 +594,10 @@ class EntityRefiner:
                     text[end_pos:]
                 )
 
+                marked_text = re.sub(r'\s+', ' ', marked_text).strip()
+
                 # Tokenize and predict
-                inputs = self.tokenizer(
-                    marked_text,
-                    return_tensors="pt",
-                    truncation=True,
-                    max_length=max_length,
-                    padding="max_length"
-                )
+                inputs = _tokenize_for_refinement(self.tokenizer, marked_text, max_length)
 
                 start = time.monotonic()
                 with torch.no_grad():
@@ -527,9 +612,13 @@ class EntityRefiner:
                 if pred_idx < len(label_classes):
                     refined_label = label_classes[pred_idx].upper()
 
+                    general_label = entity['label']
+                    # Keep the generic label when the refinement contradicts it.
+                    if refined_label not in POSSIBLE_REFINEMENTS.get(general_label):
+                        refined_entities.append(entity)
                     # legal_date is a valid model output but is intentionally
                     # not processed further downstream - discard it here.
-                    if refined_label != "LEGAL_DATE":
+                    elif refined_label != "LEGAL_DATE":
                         # Create refined entity (preserve original label)
                         refined_entity = dict(entity)
                         refined_entity['original_label'] = entity['label']
