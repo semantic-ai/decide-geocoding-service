@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from helpers import update, query
+from helpers import update
 from escape_helpers import sparql_escape_uri, sparql_escape_string, sparql_escape_date
 
 from decide_ai_service_base.sparql_config import get_prefixes_for_query, GRAPHS, AGENT_TYPES, SPARQL_PREFIXES
@@ -61,35 +61,6 @@ def _parse_date_literal(text: str) -> str:
 
     # Fallback: plain literal.
     return sparql_escape_string(value)
-
-
-def resolve_work_uri_for_expression(expression_uri: str) -> Optional[str]:
-    """Resolve the eli:Work realized by an expression.
-
-    Args:
-        expression_uri: URI of the expression whose work we want to resolve.
-
-    Returns:
-        The work URI if a matching ?expr eli:realizes ?work triple is
-        found in any graph, otherwise None.
-    """
-    q = (
-        get_prefixes_for_query("eli")
-        + """
-        SELECT ?work WHERE {
-          GRAPH ?g {
-            $expr eli:realizes | ^eli:is_realized_by ?work .
-          }
-        }
-        LIMIT 1
-        """
-    )
-
-    res = query(q.replace("$expr", sparql_escape_uri(expression_uri)), sudo=True)
-    bindings = res.get("results", {}).get("bindings", [])
-    if bindings and "work" in bindings[0]:
-        return bindings[0]["work"]["value"]
-    return None
 
 
 def _insert_triples(insert_body: str) -> None:

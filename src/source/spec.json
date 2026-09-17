@@ -1,0 +1,14 @@
+{
+  "shapes": [
+    {
+      "classes": ["http://data.europa.eu/eli/ontology#Expression"],
+      "text": ["https://data.europarl.europa.eu/def/epvoc#expressionContent"],
+      "language": "http://data.europa.eu/eli/ontology#language",
+      "work": {
+        "mode": "predicate",
+        "predicate": "http://data.europa.eu/eli/ontology#realizes",
+        "inverse": "http://data.europa.eu/eli/ontology#is_realized_by"
+      }
+    }
+  ]
+}
