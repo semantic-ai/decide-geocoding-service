@@ -119,7 +119,7 @@ class LangChainTranslationConfig(BaseModel):
 
     provider: str = Field(
         default="ollama",
-        description="LangChain provider name, e.g. 'ollama', 'openai', 'mistral'"
+        description="LangChain provider name; pre-installed 'ollama' and 'mistralai'"
     )
     model_name: str = Field(
         default="mistral-nemo",
@@ -192,7 +192,7 @@ class LlmConfig(BaseModel):
 
     provider: str = Field(
         default="ollama",
-        description="LangChain provider name, e.g. 'ollama', 'openai', 'mistral'"
+        description="LangChain provider name; the bundled (approved) set is 'ollama' and 'mistralai'"
     )
     model_name: str = Field(
         default="mistral-nemo",
