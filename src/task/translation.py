@@ -17,6 +17,7 @@ from decide_ai_service_base.util import (
 from decide_ai_service_base.annotation import RelationExtractionAnnotation
 
 from ..config import get_config
+from ..source import reader
 from .dedup import get_existing_translations
 
 TRANSLATION_COMPONENT = "http://lblod.data.gift/id/components/translation/v1.0.0"
@@ -155,7 +156,7 @@ class TranslationTask(DecisionTask):
         self,
         translated_text: str,
         target_language: str,
-        work_uri: str,
+        work_uri: Optional[str],
         source_expression_uri: str,
         graph_uri: Optional[str] = None
     ) -> str:
@@ -239,71 +240,6 @@ class TranslationTask(DecisionTask):
             return None
         return bindings[0]["graph"]["value"]
 
-    def fetch_eli_expressions(self) -> dict[str, list[str]]:
-        """
-        Retrieve ELI expressions, their epvoc:expressionContent,
-        language, and corresponding ELI work URI from the task's input container.
-
-        Returns:
-            Dictionary containing:
-                - "expression_uris": list containing the expression URIs
-                - "expression_contents": list containing the expression contents
-                - "languages": list containing the language URIs of the expressions
-                - "work_uris": list containing the work URIs of the expressions
-        """
-        target_graph = self.get_target_graph()
-        expressions_graph = sparql_escape_uri(target_graph if target_graph else GRAPHS["expressions"])
-        works_graph = sparql_escape_uri(target_graph if target_graph else GRAPHS["works"])
-
-        q = Template(
-            get_prefixes_for_query("task", "epvoc", "eli") +
-            f"""
-            SELECT ?expression ?content ?lang ?work WHERE {{
-            GRAPH {sparql_escape_uri(GRAPHS["jobs"])} {{
-                $task task:inputContainer ?container .
-            }}
-
-            GRAPH {sparql_escape_uri(GRAPHS["data_containers"])} {{
-                ?container task:hasResource ?expression .
-            }}
-
-            GRAPH {expressions_graph} {{
-                ?expression a eli:Expression ;
-                            epvoc:expressionContent ?content ;
-                            eli:language ?lang .
-            }}
-
-            GRAPH {works_graph} {{
-                ?work a eli:Work ;
-                    eli:is_realized_by ?expression .
-            }}
-            }}
-            """
-        ).substitute(task=sparql_escape_uri(self.task_uri))
-
-        bindings = query(q, sudo=True).get("results", {}).get("bindings", [])
-        if not bindings:
-            logger.warning(
-                f"No expressions found in input container for task {self.task_uri}")
-            return {
-                "expression_uris": [],
-                "expression_contents": [],
-                "languages": [],
-                "work_uris": [],
-            }
-
-        expression_uris = [b["expression"]["value"] for b in bindings]
-        expression_contents = [b["content"]["value"] for b in bindings]
-        languages = [b["lang"]["value"] for b in bindings]
-        work_uris = [b["work"]["value"] for b in bindings]
-
-        return {
-            "expression_uris": expression_uris,
-            "expression_contents": expression_contents,
-            "languages": languages,
-            "work_uris": work_uris,
-        }
-
     def create_output_container(self, resource: str) -> str:
         """
         Function to create an output data container for the translated ELI expression.
@@ -343,26 +279,26 @@ class TranslationTask(DecisionTask):
         translate it, and store translated expression in triplestore.
         """
         # Fetch the original text
-        eli_expressions = self.fetch_eli_expressions()
+        sources = reader.fetch_sources(self.task_uri, self.get_target_graph())
+        expression_uris = [s.uri for s in sources]
 
-        # Expressions that already have a translation were processed before:
+        # Sources that already have a translation were processed before:
         # reuse the existing translation instead of re-translating, but still
         # pass it downstream so later tasks can resume where a previous run
         # left off
-        existing_translations = get_existing_translations(
-            eli_expressions["expression_uris"])
+        existing_translations = get_existing_translations(expression_uris)
         if existing_translations:
             logger.info(
                 f"{len(existing_translations)} of "
-                f"{len(eli_expressions['expression_uris'])} expressions "
+                f"{len(expression_uris)} sources "
                 f"already have a translation, reusing those")
 
-        for i in range(len(eli_expressions["expression_uris"])):
-            source_expression_uri = eli_expressions["expression_uris"][i]
-            original_text = eli_expressions["expression_contents"][i]
-            source_language = LANGUAGE_URI_TO_CODE.get(
-                eli_expressions["languages"][i], None)
-            work_uri = eli_expressions["work_uris"][i]
+        for i in range(len(sources)):
+            source = sources[i]
+            source_expression_uri = source.uri
+            original_text = source.content
+            source_language = source.language
+            work_uri = source.work_uri
 
             if source_expression_uri in existing_translations:
                 logger.info(
