@@ -27,15 +27,10 @@ from decide_ai_service_base.sparql_config import (
 from .base import Source, SourceReader, SourceSpec, Shape
 
 
-def _iri(value: str) -> str:
-    """Wrap an IRI as a SPARQL ``<...>`` term (escaping any stray specials)."""
-    return sparql_escape_uri(value)
-
-
 # Stable infrastructure IRIs (the task/input vocabulary), derived from the base
 # package so they track the environment if the prefix is ever reconfigured.
-_INPUT_CONTAINER = _iri(SPARQL_PREFIXES["task"] + "inputContainer")
-_HAS_RESOURCE = _iri(SPARQL_PREFIXES["task"] + "hasResource")
+_INPUT_CONTAINER = sparql_escape_uri(SPARQL_PREFIXES["task"] + "inputContainer")
+_HAS_RESOURCE = sparql_escape_uri(SPARQL_PREFIXES["task"] + "hasResource")
 
 
 def _to_sources(bindings: list[dict]) -> list[Source]:
@@ -72,22 +67,24 @@ class GenericSourceReader(SourceReader):
             return "BIND(?e AS ?work)"
         if w.mode == "predicate":
             assert w.predicate
-            prop = _iri(w.predicate)
+            prop = sparql_escape_uri(w.predicate)
             if w.inverse:
-                prop = f"{prop} | ^{_iri(w.inverse)}"
-            return f"OPTIONAL {{ GRAPH ?gw {{ ?e {prop} ?work }} }}"
+                prop = f"{prop} | ^{sparql_escape_uri(w.inverse)}"
+            # Work is an anchor, not content: keep the source even when the link
+            # is absent, so the predicate is wrapped in an OPTIONAL.
+            return f"OPTIONAL {{ ?e {prop} ?work }}"
         return ""
 
     def _branch(self, shape: Shape, content_graph: str) -> str:
         content = (
             f"GRAPH {content_graph} {{ "
-            f"VALUES ?cls {{ {' '.join(_iri(c) for c in shape.classes)} }} . "
+            f"VALUES ?cls {{ {' '.join(sparql_escape_uri(c) for c in shape.classes)} }} . "
             "?e a ?cls . "
-            f"VALUES ?tp {{ {' '.join(_iri(t) for t in shape.text)} }} . "
+            f"VALUES ?tp {{ {' '.join(sparql_escape_uri(t) for t in shape.text)} }} . "
             "?e ?tp ?content . "
         )
         if shape.language:
-            content += f"OPTIONAL {{ ?e {_iri(shape.language)} ?lang }} . "
+            content += f"OPTIONAL {{ ?e {sparql_escape_uri(shape.language)} ?lang }} . "
         content += "}"
         work = self._work_clause(shape)
         return "{ " + content + (" " + work if work else "") + " }"
@@ -95,12 +92,12 @@ class GenericSourceReader(SourceReader):
     # -- SourceReader interface -------------------------------------------- #
 
     def fetch_sources(self, task_uri: str, target_graph: Optional[str] = None) -> list[Source]:
-        content_graph = _iri(target_graph) if target_graph else "?g"
+        content_graph = sparql_escape_uri(target_graph) if target_graph else "?g"
         union = " UNION ".join(self._branch(s, content_graph) for s in self._spec.shapes)
         q = (
             "SELECT DISTINCT ?e ?content ?lang ?work WHERE { "
-            f"GRAPH {_iri(GRAPHS['jobs'])} {{ {_iri(task_uri)} {_INPUT_CONTAINER} ?c }} "
-            f"GRAPH {_iri(GRAPHS['data_containers'])} {{ ?c {_HAS_RESOURCE} ?e }} "
+            f"GRAPH {sparql_escape_uri(GRAPHS['jobs'])} {{ {sparql_escape_uri(task_uri)} {_INPUT_CONTAINER} ?c }} "
+            f"GRAPH {sparql_escape_uri(GRAPHS['data_containers'])} {{ ?c {_HAS_RESOURCE} ?e }} "
             f"{union} "
             "}"
         )
@@ -108,60 +105,39 @@ class GenericSourceReader(SourceReader):
         return _to_sources(bindings)
 
     def get_source_text(self, uri: str) -> str:
-        s = _iri(uri)
+        s = sparql_escape_uri(uri)
         q = (
             "SELECT DISTINCT ?content WHERE { "
             "GRAPH ?g { "
-            f"VALUES ?tp {{ {' '.join(_iri(t) for t in self._spec.text_predicates)} }} . "
+            f"VALUES ?tp {{ {' '.join(sparql_escape_uri(t) for t in self._spec.text_predicates)} }} . "
             f"{s} ?tp ?content "
             "} }"
         )
         bindings = query(q, sudo=True).get("results", {}).get("bindings", [])
-        if bindings and "content" in bindings[0]:
-            return bindings[0]["content"].get("value", "")
-        return ""
+        # ?content is a required pattern here, so any returned row has text bound.
+        return bindings[0]["content"].get("value", "") if bindings else ""
 
     def resolve_work(self, uri: str) -> Optional[str]:
         clauses = []
-        s = _iri(uri)
+        s = sparql_escape_uri(uri)
         for shape in self._spec.shapes:
             w = shape.work
             if w.mode == "self":
                 clauses.append(
                     "{ "
-                    f"VALUES ?cls {{ {' '.join(_iri(c) for c in shape.classes)} }} . "
+                    f"VALUES ?cls {{ {' '.join(sparql_escape_uri(c) for c in shape.classes)} }} . "
                     f"{s} a ?cls . "
                     f"BIND({s} AS ?work) "
                     "}"
                 )
             elif w.mode == "predicate":
                 assert w.predicate
-                prop = _iri(w.predicate)
+                prop = sparql_escape_uri(w.predicate)
                 if w.inverse:
-                    prop = f"{prop} | ^{_iri(w.inverse)}"
-                clauses.append(f"{{ GRAPH ?gw {{ {s} {prop} ?work }} }}")
+                    prop = f"{prop} | ^{sparql_escape_uri(w.inverse)}"
+                clauses.append(f"{{ {s} {prop} ?work }}")
         if not clauses:
             return None
         q = "SELECT ?work WHERE { " + " UNION ".join(clauses) + " } LIMIT 1"
         bindings = query(q, sudo=True).get("results", {}).get("bindings", [])
-        if bindings and "work" in bindings[0]:
-            return bindings[0]["work"]["value"]
-        return None
-
-    def get_language(self, uri: str) -> Optional[str]:
-        preds = self._spec.language_predicates
-        if not preds:
-            return None
-        s = _iri(uri)
-        q = (
-            "SELECT ?lang WHERE { "
-            "GRAPH ?g { "
-            f"VALUES ?lp {{ {' '.join(_iri(p) for p in preds)} }} . "
-            f"{s} ?lp ?lang "
-            "} } "
-            "LIMIT 1"
-        )
-        bindings = query(q, sudo=True).get("results", {}).get("bindings", [])
-        if bindings and "lang" in bindings[0]:
-            return LANGUAGE_URI_TO_CODE.get(bindings[0]["lang"]["value"])
-        return None
+        return bindings[0]["work"]["value"] if bindings else None

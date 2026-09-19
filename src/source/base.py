@@ -8,8 +8,8 @@ expression, an OSLO besluit, or anything else.
 
 A reader is fully parameterised by a :class:`SourceSpec` (a small JSON file of
 IRIs). The single generic implementation is :class:`src.source.reader.GenericSourceReader`;
-switching ontology is a *data* change — point ``SOURCE_SPEC`` at a different
-spec file (or volume-mount one over ``src/source/spec.json``). No code change.
+switching ontology is a *data* change — replace ``config/spec.json`` (or volume-mount a
+different spec over it). No code change, no image rebuild.
 """
 
 import json
@@ -68,9 +68,13 @@ class WorkSpec:
 class Shape:
     """One way a source resource can appear in the store.
 
-    A spec is a list of shapes; the reader UNIONs over them. ELI needs one shape
-    (``eli:Expression``); OSLO needs two (``oslo:Besluit`` input, plus the
-    service's own ``eli:Expression`` translation artifacts).
+    A spec is a list of shapes; the reader UNIONs over them and matches whichever
+    shape is actually present in a task's input container — a shape that doesn't
+    match a given container is simply inert. ELI lists one shape
+    (``eli:Expression``). OSLO lists two: the original ``oslo:Besluit`` (read by the
+    translation step) and the ``eli:Expression`` artifact that translation emits
+    (read by downstream segmentation/NER). When the translation step is skipped,
+    the artifact shape never matches and downstream reads the besluiten directly.
     """
 
     classes: list[str]
@@ -164,7 +168,3 @@ class SourceReader(ABC):
     @abstractmethod
     def resolve_work(self, uri: str) -> Optional[str]:
         """Resolve the work/anchor a source belongs to (may be ``None``)."""
-
-    @abstractmethod
-    def get_language(self, uri: str) -> Optional[str]:
-        """Return the language *code* of a source resource (may be ``None``)."""

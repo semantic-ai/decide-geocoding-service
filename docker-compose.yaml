@@ -43,12 +43,10 @@ services:
       - ./:/app
       - ./config.json:/config/config.json:ro
       - ./docker-compose.yaml:/tmp/docker-compose.yaml
-      # To serve the OSLO ontology instead of ELI, point SOURCE_SPEC at the OSLO
-      # spec — the repo is already mounted at /app, so no extra mount is needed
-      # (uncomment to enable OSLO; the reader stays the same, only the spec changes):
-      # - SOURCE_SPEC: /app/impl-oslo/spec.json
-      # Equivalently, volume-mount a spec over the default (no env var):
-      # - ./impl-oslo/spec.json:/app/src/source/spec.json:ro
+      # To serve a different source ontology, mount a spec over ./config/spec.json
+      # (the active spec; the repo is already mounted at /app). The reader stays
+      # the same, only the spec changes:
+      # - ./eli-spec.json:/app/config/spec.json:ro
 
 networks:
   app-decide_default:

@@ -307,48 +307,38 @@ Ensure the required Docker network exists (see `docker-compose.yaml`).
 
 ## Ontology-agnostic source (ELI / OSLO)
 
-By default the service reads **ELI expressions** (`eli:Expression` carrying `epvoc:expressionContent`) from each task's input container. The ontology-specific *reading* is isolated behind a single generic reader in `src/source/` that is parameterised entirely by a small JSON **spec** of IRIs. The segmentation, NER, translation and annotation logic is **ontology-neutral** — it operates on whatever source the reader returns and never names an ontology.
+The service reads each task's input sources through a single generic reader in `src/source/` that is parameterised entirely by a small JSON **spec** of IRIs at `config/spec.json` (currently the OSLO spec; the ELI reference spec lives at `src/source/spec.json`). The segmentation, NER, translation and annotation logic is **ontology-neutral** — it operates on whatever source the reader returns and never names an ontology.
 
 ### Switching ontology = changing a spec file (no code, no image rebuild)
 
-The active spec defaults to `src/source/spec.json` (ELI). Point the reader at a different spec — the reader stays the same, only the data changes:
+The active spec is `config/spec.json` — currently the OSLO spec. To serve a different ontology, replace (or volume-mount over) that file; the reader stays the same, only the data changes:
 
 ```yaml
-# docker-compose.yaml — set SOURCE_SPEC to the OSLO spec (the repo is mounted at /app)
-services:
-  ner-service:
-    environment:
-      - SOURCE_SPEC: /app/impl-oslo/spec.json
-```
-
-Equivalently, volume-mount a spec over the default (no env var needed):
-
-```yaml
+# docker-compose.yaml — mount a different spec over the active one
 services:
   ner-service:
     volumes:
-      - ./impl-oslo/spec.json:/app/src/source/spec.json:ro
+      - ./eli-spec.json:/app/config/spec.json:ro
 ```
 
-A spec is a list of **shapes**; each shape names the source `classes`, the `text` and `language` predicates, and how the `work` anchor is resolved. Add a new ontology by dropping in another `spec.json` and pointing `SOURCE_SPEC` at it:
+A spec is a list of **shapes**; each shape names the source `classes`, the `text` and `language` predicates, and how the `work` anchor is resolved. Add a new ontology by authoring another `spec.json` and mounting it over `config/spec.json`:
 
 ```json
 { "shapes": [ {
     "classes":  ["http://data.vlaanderen.be/ns/oslo#Besluit"],
     "text":     ["http://www.w3.org/ns/prov#value"],
-    "language": "http://data.europa.eu/eli/ontology#language",
     "work":     { "mode": "self" }
 } ] }
 ```
 
 ### ELI vs OSLO mapping
 
-| Concept   | ELI (default)                  | OSLO                                 |
-|-----------|--------------------------------|--------------------------------------|
-| source    | `eli:Expression`               | `oslo:Besluit`                       |
-| text      | `epvoc:expressionContent`      | `prov:value`                         |
-| work      | `eli:realizes` → the work      | the `oslo:Besluit` itself (`mode: self`) |
-| language  | `eli:language`                 | `eli:language` (optional)            |
+| Concept  | ELI                              | OSLO                                 |
+|----------|----------------------------------|--------------------------------------|
+| source   | `eli:Expression`                 | `oslo:Besluit`                       |
+| text     | `epvoc:expressionContent`        | `prov:value`                         |
+| work     | `eli:realizes` → the work        | the `oslo:Besluit` itself (`mode: self`) |
+| language | `eli:language`                   | — (none; language-detection fallback)  |
 
 OSLO has no separate "work" concept, so a besluit is its own work anchor: annotations are proposed **on the `oslo:Besluit`** using ELI predicates. The service's own translation output stays `eli:Expression`, so the OSLO spec lists a second shape matching that ELI translated artifact that downstream tasks (segmentation, NER) consume.
 
