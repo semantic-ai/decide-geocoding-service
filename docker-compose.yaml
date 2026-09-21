@@ -43,6 +43,10 @@ services:
       - ./:/app
       - ./config.json:/config/config.json:ro
       - ./docker-compose.yaml:/tmp/docker-compose.yaml
+      # To serve a different source ontology, mount a spec over ./config/spec.json
+      # (the active spec; the repo is already mounted at /app). The reader stays
+      # the same, only the spec changes:
+      # - ./eli-spec.json:/app/config/spec.json:ro
 
 networks:
   app-decide_default:

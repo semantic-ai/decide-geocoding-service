@@ -15,7 +15,8 @@ from decide_ai_service_base.annotation import RelationExtractionAnnotation
 
 from ..ner_functions import extract_entities
 from ..config import get_config
-from ..entity_mappers import map_entity_to_annotations, resolve_work_uri_for_expression
+from ..entity_mappers import map_entity_to_annotations
+from ..source import reader
 from ..helper_functions import fail_if_no_successes
 from ..library.entity_projections import project_spans
 from ..library.entity_formatter import EntityFormatter
@@ -78,7 +79,7 @@ class EntityExtractionTask(DecisionTask):
         successes = 0
 
         # Resolve the work URI for this expression once (may be None if unknown)
-        work_uri = resolve_work_uri_for_expression(source_uri)
+        work_uri = reader.resolve_work(source_uri)
 
         for entity in entities:
             try:
@@ -198,87 +199,15 @@ class EntityExtractionTask(DecisionTask):
 
     def fetch_expression_data(self, expression_uri: str) -> str:
         """
-        Retrieve the text content from a specific expression URI.
+        Retrieve the text content from a specific source URI.
 
-        Only epvoc:expressionContent, not title/description/decision_basis: this is
-        used as the projection target for spans extracted from the English translation,
-        and translation only ever covers expressionContent (see TranslationTask). Mixing
-        in the other fields would put the projection target text out of scope with the
-        text the spans were computed against, and with the offsets we'd be saving.
+        Delegates to the active source reader (see ``src.source``) so the content
+        predicate is ontology-specific. Only the content is used (not
+        title/description/decision_basis): this is the projection target for spans
+        extracted from the English translation, and translation only ever covers
+        the content.
         """
-        query_template = Template(
-            get_prefixes_for_query("epvoc") +
-            """
-            SELECT DISTINCT ?content
-            WHERE {
-              GRAPH ?graph {
-                VALUES ?s {
-                  $expression
-                }
-                OPTIONAL { ?s epvoc:expressionContent ?content }
-              }
-            }
-        """)
-
-        query_result = query(
-            query_template.substitute(
-                expression=sparql_escape_uri(expression_uri)),
-            sudo=True
-        )
-
-        bindings = query_result.get("results", {}).get("bindings", [])
-        if bindings and "content" in bindings[0]:
-            return bindings[0]["content"].get("value", "")
-        return ""
-
-    def fetch_eli_expressions(self) -> dict[str, list[str]]:
-        """
-        Retrieve the ELI expressions and their contents from the task's input container.
-        Note that these will be the translated expressions.
-
-        Returns:
-            Dictionary containing:
-                - "expression_uris": list containing the expression URIs
-                - "expression_contents": list containing the expression contents
-        """
-        q = Template(
-            get_prefixes_for_query("task", "epvoc", "eli") +
-            f"""
-            SELECT ?expression ?content WHERE {{
-            GRAPH {sparql_escape_uri(GRAPHS["jobs"])} {{
-                $task task:inputContainer ?container .
-            }}
-
-            GRAPH {sparql_escape_uri(GRAPHS["data_containers"])} {{
-                ?container task:hasResource ?expression .
-            }}
-
-            GRAPH {sparql_escape_uri(GRAPHS["expressions"])} {{
-                ?expression a eli:Expression ;
-                            epvoc:expressionContent ?content .
-            }}            
-            }}
-            """
-        ).substitute(
-            task=sparql_escape_uri(self.task_uri)
-        )
-
-        bindings = query(q, sudo=True).get("results", {}).get("bindings", [])
-        if not bindings:
-            logger.warning(
-                f"No expressions found in input container for task {self.task_uri}")
-            return {
-                "expression_uris": [],
-                "expression_contents": []
-            }
-
-        expression_uris = [b["expression"]["value"] for b in bindings]
-        expression_contents = [b["content"]["value"] for b in bindings]
-
-        return {
-            "expression_uris": expression_uris,
-            "expression_contents": expression_contents
-        }
+        return reader.get_source_text(expression_uri)
 
     def create_output_container(self, resource: str) -> str:
         """
@@ -318,8 +247,8 @@ class EntityExtractionTask(DecisionTask):
         Process NER task by retrieving English translation from database and extracting entities.
         Assumes TranslationTask has already run and created the English expression.
         """
-        eli_expressions = self.fetch_eli_expressions()
-        expression_uris = eli_expressions["expression_uris"]
+        sources = reader.fetch_sources(self.task_uri)
+        expression_uris = [s.uri for s in sources]
         skipped_empty = 0
 
         # Expressions that already have entity annotations were processed
@@ -333,7 +262,7 @@ class EntityExtractionTask(DecisionTask):
 
         for i in range(len(expression_uris)):
             target_expression_uri = expression_uris[i]
-            target_english_text = eli_expressions["expression_contents"][i]
+            target_english_text = sources[i].content
 
             if target_expression_uri in already_extracted:
                 logger.info(

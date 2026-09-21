@@ -305,6 +305,76 @@ Ensure the required Docker network exists (see `docker-compose.yaml`).
 3. **Processing** → Apply refinement, geocoding, translation as needed. Overlapping entities are filtered (when `post_process` enabled)
 4. **Storage** → Annotations stored in SPARQL triplestore (AI graph) with full provenance
 
+## Ontology-agnostic source (ELI / OSLO)
+
+The service reads each task's input sources through a single generic reader in `src/source/` that is parameterised entirely by a small JSON **spec** of IRIs at `config/spec.json` (currently the OSLO spec; the ELI reference spec lives at `src/source/spec.json`). The segmentation, NER, translation and annotation logic is **ontology-neutral** — it operates on whatever source the reader returns and never names an ontology.
+
+### Switching ontology = changing a spec file (no code, no image rebuild)
+
+The active spec is `config/spec.json` — currently the OSLO spec. To serve a different ontology, replace (or volume-mount over) that file; the reader stays the same, only the data changes:
+
+```yaml
+# docker-compose.yaml — mount a different spec over the active one
+services:
+  ner-service:
+    volumes:
+      - ./eli-spec.json:/app/config/spec.json:ro
+```
+
+A spec is a list of **shapes**; each shape names the source `classes`, the `text` and `language` predicates, and how the `work` anchor is resolved. Add a new ontology by authoring another `spec.json` and mounting it over `config/spec.json`:
+
+```json
+{ "shapes": [ {
+    "classes":  ["http://data.vlaanderen.be/ns/oslo#Besluit"],
+    "text":     ["http://www.w3.org/ns/prov#value"],
+    "work":     { "mode": "self" }
+} ] }
+```
+
+### ELI vs OSLO mapping
+
+| Concept  | ELI                              | OSLO                                 |
+|----------|----------------------------------|--------------------------------------|
+| source   | `eli:Expression`                 | `oslo:Besluit`                       |
+| text     | `epvoc:expressionContent`        | `prov:value`                         |
+| work     | `eli:realizes` → the work        | the `oslo:Besluit` itself (`mode: self`) |
+| language | `eli:language`                   | — (none; language-detection fallback)  |
+
+OSLO has no separate "work" concept, so a besluit is its own work anchor: annotations are proposed **on the `oslo:Besluit`** using ELI predicates. The service's own translation output stays `eli:Expression`, so the OSLO spec lists a second shape matching that ELI translated artifact that downstream tasks (segmentation, NER) consume.
+
+### With or without translation
+
+The OSLO spec's two shapes map to pipeline stages, and the same spec works whether or not the translation step runs — the reader matches whichever shape is present in a task's input container:
+
+- **With translation** — the translation task reads the `oslo:Besluit` (shape 1) and emits an `eli:Expression` artifact; segmentation/NER then read that artifact (shape 2).
+- **Without translation** — segmentation/NER read the original `oslo:Besluit` (shape 1) directly; shape 2 matches nothing and is inert.
+
+Either way, annotations are anchored on the `oslo:Besluit` (shape 1's `work` is `self`; shape 2's `eli:realizes` also resolves back to the besluit). When translation is skipped, the orchestrator points the downstream task's input container at the original besluiten.
+
+### Example
+
+An `oslo:Besluit` in the task's input container:
+
+```turtle
+<https://data.example/bezluit/abc> a oslo:Besluit ;
+    prov:value "Beslissend op 17.09.2021. Het college besluit: ..." ;
+    eli:language <http://publications.europa.eu/resource/authority/language/NLD> .
+```
+
+The service runs segmentation/NER/translation on the text and stores annotations as `oa:Annotation` whose `rdf:Statement` is anchored on the besluit (an ELI predicate proposed on an OSLO resource):
+
+```turtle
+<http://data.lblod.info/id/annotations/xyz> a oa:Annotation ;
+    oa:motivatedBy oa:linking ;
+    oa:hasBody <http://data.lblod.info/id/statements/p> ;
+    oa:hasTarget <http://data.lblod.info/id/specific-resources/t> .
+<http://data.lblod.info/id/specific-resources/t> oa:hasSource <https://data.example/bezluit/abc> .
+<http://data.lblod.info/id/statements/p> a rdf:Statement ;
+    rdf:subject <https://data.example/bezluit/abc> ;      # the oslo:Besluit
+    rdf:predicate eli:date_publication ;                   # ELI predicate on OSLO resource
+    rdf:object "2021-09-17"^^xsd:date .
+```
+
 ## Deployment
 
 **Network**: Ensure `app-decide_default` network exists or update network name in `docker-compose.yaml`

@@ -12,7 +12,8 @@ wheels/
 
 # Nominatim data
 nominatim-data/
-/config
+/config/*
+!/config/spec.json
 /data
 /scripts
 docker-compose.yaml
