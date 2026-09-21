@@ -26,13 +26,13 @@ from .reader import GenericSourceReader
 
 
 def build_reader(spec_path: str) -> GenericSourceReader:
-    """Build a :class:`GenericSourceReader` from the spec at ``spec_path``."""
+    """Build a :class:`GenericSourceReader` from the spec at ``spec_path``."""   
     return GenericSourceReader(load_spec(spec_path))
 
 
 # Built once at import. ``query``/``update`` only hit the triplestore when a
 # method is actually called, so import-time construction is cheap and safe.
-reader: SourceReader = build_reader(os.path.join('config', "spec.json"))
+reader: SourceReader = build_reader(os.path.join('/','config', 'spec.json'))
 
 
 def get_reader() -> SourceReader:
